@@ -98,4 +98,13 @@ public class EmptyVideoTech implements VideoTech {
 
   @Override
   public void setDeviceOrientation(int rotation) {}
+
+  /// M: ----- Mediatek features ------------
+  @Override
+  public void downgradeToAudio() {
+  }
+
+  @Override
+  public void cancelUpgradeVideoRequest() {
+  }
 }

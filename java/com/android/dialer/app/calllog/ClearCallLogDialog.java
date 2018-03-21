@@ -76,16 +76,17 @@ public class ClearCallLogDialog extends DialogFragment {
                   @Override
                   protected void onPostExecute(Void result) {
                     final Activity activity = progressDialog.getOwnerActivity();
+                    if (progressDialog != null && progressDialog.isShowing()) {
+                      progressDialog.dismiss();
+                    }
 
-                    if (activity == null || activity.isDestroyed() || activity.isFinishing()) {
+                    if (activity == null || activity.isDestroyed() || activity.isFinishing()
+                      || listener == null) {
                       return;
                     }
 
                     listener.callHistoryDeleted();
-                    if (progressDialog != null && progressDialog.isShowing()) {
-                      progressDialog.dismiss();
                     }
-                  }
                 };
             // TODO: Once we have the API, we should configure this ProgressDialog
             // to only show up after a certain time (e.g. 150ms)

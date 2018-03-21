@@ -43,6 +43,8 @@ import com.android.dialer.compat.CompatUtils;
 import com.android.dialer.configprovider.ConfigProviderBindings;
 import com.android.dialer.logging.InteractionEvent;
 import com.android.dialer.logging.Logger;
+import com.mediatek.contacts.util.ContactsCommonListUtils;
+
 import java.util.HashSet;
 
 /**
@@ -105,8 +107,9 @@ public abstract class ContactEntryListAdapter extends IndexerListAdapter {
     mDefaultFilterHeaderText = getContext().getResources().getText(resourceId);
   }
 
+  ///M:For [MTK Dialer Search] customization
   @Override
-  protected ContactListItemView newView(
+  protected /*ContactListItemView*/View newView(
       Context context, int partition, Cursor cursor, int position, ViewGroup parent) {
     final ContactListItemView view = new ContactListItemView(context, null);
     view.setIsSectionHeaderEnabled(isSectionHeaderDisplayEnabled());
@@ -767,6 +770,10 @@ public abstract class ContactEntryListAdapter extends IndexerListAdapter {
       Cursor cursor, int displayNameColumn, int lookupKeyColumn) {
     final String displayName = cursor.getString(displayNameColumn);
     final String lookupKey = cursor.getString(lookupKeyColumn);
-    return new DefaultImageRequest(displayName, lookupKey, mCircularPhotos);
+    /**M:[MTK SIM Contacts feature]original code:
+     * return new DefaultImageRequest(displayName, lookupKey, mCircularPhotos);
+     */
+    return ContactsCommonListUtils.getDefaultImageRequest(cursor, displayName, lookupKey,
+        mCircularPhotos);
   }
 }

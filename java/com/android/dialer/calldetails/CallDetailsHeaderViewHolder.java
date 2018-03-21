@@ -16,17 +16,25 @@
 
 package com.android.dialer.calldetails;
 
+import java.util.ArrayList;
+
 import android.content.Context;
+import android.content.Intent;
 import android.net.Uri;
 import android.support.v7.widget.RecyclerView;
 import android.telecom.PhoneAccount;
+import android.text.BidiFormatter;
+import android.text.TextDirectionHeuristics;
 import android.text.TextUtils;
 import android.view.View;
 import android.view.View.OnClickListener;
 import android.widget.QuickContactBadge;
 import android.widget.TextView;
+import android.util.Log;
+
 import com.android.contacts.common.ContactPhotoManager;
 import com.android.dialer.callintent.CallInitiationType;
+import com.android.dialer.app.calllog.IntentProvider;
 import com.android.dialer.callintent.CallIntentBuilder;
 import com.android.dialer.common.Assert;
 import com.android.dialer.dialercontact.DialerContact;
@@ -34,11 +42,12 @@ import com.android.dialer.logging.DialerImpression;
 import com.android.dialer.logging.InteractionEvent;
 import com.android.dialer.logging.Logger;
 import com.android.dialer.util.DialerUtils;
+import com.mediatek.dialer.util.DialerVolteUtils;
 
 /** ViewHolder for Header/Contact in {@link CallDetailsActivity}. */
 public class CallDetailsHeaderViewHolder extends RecyclerView.ViewHolder
     implements OnClickListener {
-
+  private static final String TAG = CallDetailsHeaderViewHolder.class.getSimpleName();
   private final View callBackButton;
   private final TextView nameView;
   private final TextView numberView;
@@ -47,8 +56,10 @@ public class CallDetailsHeaderViewHolder extends RecyclerView.ViewHolder
   private final Context context;
 
   private DialerContact contact;
+  ///M:[VoLTE ConfCallLog]
+  private ArrayList<String> confNumbers;
 
-  CallDetailsHeaderViewHolder(View container) {
+  public CallDetailsHeaderViewHolder(View container) {
     super(container);
     context = container.getContext();
     callBackButton = container.findViewById(R.id.call_back_button);
@@ -65,7 +76,13 @@ public class CallDetailsHeaderViewHolder extends RecyclerView.ViewHolder
 
   /** Populates the contact info fields based on the current contact information. */
   void updateContactInfo(DialerContact contact) {
+    updateContactInfo(contact, null);
+  }
+
+  /**M: Populates the contact info fields based on the current contact information. */
+  public void updateContactInfo(DialerContact contact, ArrayList<String> confNumbers) {
     this.contact = contact;
+    this.confNumbers = confNumbers;
     ContactPhotoManager.getInstance(context)
         .loadDialerThumbnailOrPhoto(
             contactPhoto,
@@ -76,16 +93,29 @@ public class CallDetailsHeaderViewHolder extends RecyclerView.ViewHolder
             contact.getContactType());
 
     nameView.setText(contact.getNameOrNumber());
+
+    ///M: [VoLTE ConfCallLog] @{
+    if(this.confNumbers != null) {
+      nameView.setText(context.getString(R.string.confCall));
+    } else {
+    ///@}
+      nameView.setText(contact.getNameOrNumber());
+    }
     if (!TextUtils.isEmpty(contact.getDisplayNumber())) {
       numberView.setVisibility(View.VISIBLE);
+      // set callerNumber text show direction LTR @{
+      final BidiFormatter formatter = BidiFormatter.getInstance();
       String secondaryInfo =
           TextUtils.isEmpty(contact.getNumberLabel())
               ? contact.getDisplayNumber()
               : context.getString(
                   com.android.contacts.common.R.string.call_subject_type_and_number,
-                  contact.getNumberLabel(),
-                  contact.getDisplayNumber());
-      numberView.setText(secondaryInfo);
+                  formatter.unicodeWrap(contact.getNumberLabel(),
+                            TextDirectionHeuristics.FIRSTSTRONG_LTR),
+                  formatter.unicodeWrap(contact.getDisplayNumber(),
+                            TextDirectionHeuristics.FIRSTSTRONG_LTR));
+      numberView.setText(formatter.unicodeWrap(secondaryInfo.toString()));
+      /// @}
     } else {
       numberView.setVisibility(View.GONE);
       numberView.setText(null);
@@ -102,15 +132,36 @@ public class CallDetailsHeaderViewHolder extends RecyclerView.ViewHolder
     if (TextUtils.isEmpty(contact.getNumber())) {
       callBackButton.setVisibility(View.GONE);
     }
+
+    // /M: [Volte ConfCall] Support launch volte conference call @{
+    if (confNumbers != null) {
+        if (DialerVolteUtils.isVolteConfCallEnable(context)) {
+            Log.d(TAG, "is a conference call, volte true, show call button");
+            callBackButton.setVisibility(View.VISIBLE);
+        } else {
+            Log.d(TAG, "is a conference call, volte false, hide call button");
+            callBackButton.setVisibility(View.GONE);
+        }
+    }// / @}
   }
 
   @Override
   public void onClick(View view) {
     if (view == callBackButton) {
       Logger.get(view.getContext()).logImpression(DialerImpression.Type.CALL_DETAILS_CALL_BACK);
+      ///M: [Volte ConfCall] Support launch volte conference call @{
+      Context context = view.getContext();
+      if (DialerVolteUtils.isVolteConfCallEnable(context) && confNumbers != null) {
+        Intent intent = IntentProvider.getReturnVolteConfCallIntentProvider(confNumbers)
+            .getIntent(context);
+        DialerUtils.startActivityWithErrorToast(context, intent);
+      } else {
+      /// @}
       DialerUtils.startActivityWithErrorToast(
           view.getContext(),
-          new CallIntentBuilder(contact.getNumber(), CallInitiationType.Type.CALL_DETAILS).build());
+          new CallIntentBuilder(contact.getNumber() + contact.getPostDialDigits(),
+              CallInitiationType.Type.CALL_DETAILS).build());
+      }
     } else {
       throw Assert.createIllegalStateFailException("View OnClickListener not implemented: " + view);
     }

@@ -31,6 +31,7 @@ import android.view.WindowManager.LayoutParams;
 import android.widget.Button;
 import android.widget.EditText;
 import com.android.dialer.common.FragmentUtils;
+import com.android.dialer.common.LogUtil;
 
 /**
  * Shows the dialog for users to enter a custom message when rejecting a call with an SMS message.
@@ -66,7 +67,18 @@ public class CreateCustomSmsDialogFragment extends AppCompatDialogFragment {
                 FragmentUtils.getParentUnsafe(
                         CreateCustomSmsDialogFragment.this, CreateCustomSmsHolder.class)
                     .customSmsCreated(editText.getText().toString().trim());
-                dismiss();
+                /// M: ALPS03482920 fix fragement destroyed before dismiss. @{
+                if (getFragmentManager() == null) {
+                  LogUtil.i("CreateCustomSmsDialogFragment.setPositiveButton.onClick",
+                     "fragment is null, not to dismiss ");
+                } else {
+                /// @}
+                  /// M: ALPS03603672 allow state loss for fixed JE issue.
+                  /// Exception is can not perform this action after onSaveInstanceState. @{
+                  /// Google code: dismiss();
+                  dismissAllowingStateLoss();
+                  /// @}
+                }
               }
             })
         .setNegativeButton(

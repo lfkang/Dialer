@@ -39,6 +39,8 @@ import android.telecom.StatusHints;
 import android.telecom.TelecomManager;
 import android.telecom.VideoProfile;
 import android.telephony.PhoneNumberUtils;
+import android.telephony.SubscriptionManager;
+import android.telephony.TelephonyManager;
 import android.text.TextUtils;
 import com.android.contacts.common.compat.CallCompat;
 import com.android.contacts.common.compat.TelephonyManagerCompat;
@@ -61,7 +63,9 @@ import com.android.dialer.logging.ContactLookupResult;
 import com.android.dialer.logging.DialerImpression;
 import com.android.dialer.logging.Logger;
 import com.android.dialer.theme.R;
+import com.android.incallui.CallerInfoUtils;
 import com.android.incallui.audiomode.AudioModeProvider;
+import com.android.incallui.InCallPresenter;
 import com.android.incallui.latencyreport.LatencyReport;
 import com.android.incallui.util.TelecomCallUtil;
 import com.android.incallui.videotech.VideoTech;
@@ -69,7 +73,18 @@ import com.android.incallui.videotech.VideoTech.VideoTechListener;
 import com.android.incallui.videotech.empty.EmptyVideoTech;
 import com.android.incallui.videotech.ims.ImsVideoTech;
 import com.android.incallui.videotech.lightbringer.LightbringerTech;
+import com.android.incallui.videotech.utils.SessionModificationState;
 import com.android.incallui.videotech.utils.VideoUtils;
+import com.mediatek.incallui.CallDetailChangeHandler;
+/// M: add for performance trace.
+import com.mediatek.incallui.InCallTrace;
+/// M: add for performance trace.
+import com.mediatek.incallui.plugin.ExtensionManager;
+import com.mediatek.incallui.video.VideoFeatures;
+import com.mediatek.incallui.video.VideoSessionController;
+import com.mediatek.incallui.volte.ConferenceChildrenChangeHandler;
+import com.mediatek.incallui.volte.InCallUIVolteUtils;
+
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
 import java.util.ArrayList;
@@ -79,6 +94,10 @@ import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
+
+import mediatek.telecom.MtkCall;
+import mediatek.telecom.MtkCall.MtkDetails;
+import mediatek.telecom.MtkConnection.MtkVideoProvider;
 
 /** Describes a single call and its state. */
 public class DialerCall implements VideoTechListener, StateChangedListener, CapabilitiesListener {
@@ -172,36 +191,102 @@ public class DialerCall implements VideoTechListener, StateChangedListener, Capa
    */
   private boolean mIsCallSubjectSupported;
 
+  /// M: [Modification for finishing Transparent InCall Screen if necessary]
+  /// such as:ALPS03748801,select sim press home key, show select again.
+  /// such as:ALPS02302461,occur JE when MT call arrive at some case. @{
+  private int mStateEx = State.INVALID;
+  /// @}
+
   private final Call.Callback mTelecomCallCallback =
       new Call.Callback() {
         @Override
         public void onStateChanged(Call call, int newState) {
           LogUtil.v("TelecomCallCallback.onStateChanged", "call=" + call + " newState=" + newState);
-          update();
+          /// M: add for performance trace. @{
+          InCallTrace.begin("telecomStateChanged");
+          /// @}
+
+          /// M: Reduce state change to improve performance. @{
+          stateUpdate();
+          /// @}
+
+          /// M: add for performance trace. @{
+          InCallTrace.end("telecomStateChanged");
+          /// @}
         }
 
         @Override
         public void onParentChanged(Call call, Call newParent) {
           LogUtil.v(
               "TelecomCallCallback.onParentChanged", "call=" + call + " newParent=" + newParent);
+          /// M: Print parnet call and child call id mapping to telecom id @{
+          printParnetChanged(call, newParent);
+          /// @}
           update();
         }
 
         @Override
         public void onChildrenChanged(Call call, List<Call> children) {
+          /// M: Print parnet call and child call id mapping to telecom id @{
+          printChildrenChanged(call, children);
+          /// @}
           update();
+          /// M: for VOLTE @{
+          handleChildrenChanged();
+          /// @}
         }
 
         @Override
         public void onDetailsChanged(Call call, Call.Details details) {
-          LogUtil.v("TelecomCallCallback.onStateChanged", " call=" + call + " details=" + details);
+          LogUtil.v("TelecomCallCallback.onDetailsChanged", "call=" + call + " details=" + details);
+          /// M: add for performance trace. @{
+          InCallTrace.begin("telecomDetailsChanged");
+          /// @}
+
+          /// M: Ignore details change during disconnecting. @{
+          if (translateState(mTelecomCall.getState()) == DialerCall.State.DISCONNECTING) {
+            LogUtil.i("TelecomCallCallback.onDetailsChanged", "Ignore details change.");
+
+            /// M: add for performance trace. @{
+            InCallTrace.end("telecomDetailsChanged");
+            /// @}
+            return;
+          }
+          /// @}
+
+          /// M: Check details change to increase performance. @{
+          boolean forceUpdate = forceUpdateDetailByState();
+          Call.Details newDetail = mTelecomCall.getDetails();
+          if (!forceUpdate &&
+              skipUpdateDetails(mDetails, newDetail)) {
+            LogUtil.d("TelecomCallCallback.onDetailsChanged", "skip details change.");
+
+            /// M: add for performance trace. @{
+            InCallTrace.end("telecomDetailsChanged");
+            /// @}
+            return;
+          }
+          /// @}
+
           update();
+
+          /// M: for VOLTE @{
+          handleDetailsChanged(newDetail);
+          /// @}
+
+          /// M: Check details change to increase performance. @{
+          mDetails = newDetail;
+          /// @}
+
+          /// M: add for performance trace. @{
+          InCallTrace.end("telecomDetailsChanged");
+          /// @}
         }
 
         @Override
         public void onCannedTextResponsesLoaded(Call call, List<String> cannedTextResponses) {
           LogUtil.v(
-              "TelecomCallCallback.onStateChanged",
+              "TelecomCallCallback.onCannedTextResponsesLoaded",
               "call=" + call + " cannedTextResponses=" + cannedTextResponses);
           for (CannedTextResponsesLoadedListener listener : mCannedTextResponsesLoadedListeners) {
             listener.onCannedTextResponsesLoaded(DialerCall.this);
@@ -211,7 +296,7 @@ public class DialerCall implements VideoTechListener, StateChangedListener, Capa
         @Override
         public void onPostDialWait(Call call, String remainingPostDialSequence) {
           LogUtil.v(
-              "TelecomCallCallback.onStateChanged",
+              "TelecomCallCallback.onPostDialWait",
               "call=" + call + " remainingPostDialSequence=" + remainingPostDialSequence);
           update();
         }
@@ -219,20 +304,20 @@ public class DialerCall implements VideoTechListener, StateChangedListener, Capa
         @Override
         public void onVideoCallChanged(Call call, VideoCall videoCall) {
           LogUtil.v(
-              "TelecomCallCallback.onStateChanged", "call=" + call + " videoCall=" + videoCall);
+              "TelecomCallCallback.onVideoCallChanged", "call=" + call + " videoCall=" + videoCall);
           update();
         }
 
         @Override
         public void onCallDestroyed(Call call) {
-          LogUtil.v("TelecomCallCallback.onStateChanged", "call=" + call);
+          LogUtil.v("TelecomCallCallback.onCallDestroyed", "call=" + call);
           unregisterCallback();
         }
 
         @Override
         public void onConferenceableCallsChanged(Call call, List<Call> conferenceableCalls) {
           LogUtil.v(
-              "DialerCall.onConferenceableCallsChanged",
+              "TelecomCallCallback.onConferenceableCallsChanged",
               "call %s, conferenceable calls: %d",
               call,
               conferenceableCalls.size());
@@ -242,7 +327,7 @@ public class DialerCall implements VideoTechListener, StateChangedListener, Capa
         @Override
         public void onConnectionEvent(android.telecom.Call call, String event, Bundle extras) {
           LogUtil.v(
-              "DialerCall.onConnectionEvent",
+              "TelecomCallCallback.onConnectionEvent",
               "Call: " + call + ", Event: " + event + ", Extras: " + extras);
           switch (event) {
               // The Previous attempt to Merge two calls together has failed in Telecom. We must
@@ -279,6 +364,10 @@ public class DialerCall implements VideoTechListener, StateChangedListener, Capa
             default:
               break;
           }
+          ExtensionManager.getInCallButtonExt().showToastForGTT(extras);
+          /// M: for Digits @{
+          ExtensionManager.getInCallExt().onConnectionEvent(call, event, extras);
+          /// @}
         }
       };
 
@@ -315,6 +404,21 @@ public class DialerCall implements VideoTechListener, StateChangedListener, Capa
     parseCallSpecificAppData();
 
     updateEnrichedCallSession();
+
+    /// M: [voice call]manage video call features.
+    mVideoFeatures = new VideoFeatures(this);
+
+    /// M: Check details change to increase performance. @{
+    mDetails = mTelecomCall.getDetails();
+    ///@}
+
+    /// M: Hide preview view when it's video conferene call.
+    /// setHidePreview is only for video call, no need to check if it's video call. @{
+    if (isConferenceCall()) {
+        LogUtil.d("DialerCall.DialerCall", "Conference call");
+        setHidePreview(true);
+    }
+    /// @}
   }
 
   private static int translateState(int state) {
@@ -406,7 +510,8 @@ public class DialerCall implements VideoTechListener, StateChangedListener, Capa
     }
   }
 
-  /* package-private */ Call getTelecomCall() {
+  /// M:/* package-private */
+  public Call getTelecomCall() {
     return mTelecomCall;
   }
 
@@ -441,7 +546,7 @@ public class DialerCall implements VideoTechListener, StateChangedListener, Capa
           .unregisterCapabilitiesListener(this);
       EnrichedCallComponent.get(mContext)
           .getEnrichedCallManager()
-          .unregisterCapabilitiesListener(this);
+          .unregisterStateChangedListener(this);
     } else {
       for (DialerCallListener listener : mListeners) {
         listener.onDialerCallUpdate();
@@ -476,19 +581,32 @@ public class DialerCall implements VideoTechListener, StateChangedListener, Capa
 
     updateFromCallExtras(mTelecomCall.getDetails().getExtras());
 
+    /// M: ALPS03567937. Record handle change to update voice mail. @{
+    boolean handleChanged = false;
+    /// @}
+
     // If the handle of the call has changed, update state for the call determining if it is an
     // emergency call.
     Uri newHandle = mTelecomCall.getDetails().getHandle();
     if (!Objects.equals(mHandle, newHandle)) {
+      handleChanged = true;
       mHandle = newHandle;
       updateEmergencyCallState();
     }
+
+    /// M: ALPS03567937. Record account change to update voice mail.
+    // Due to selec account from connecting to dialing. @{
+    boolean accountChanged = false;
+    /// @}
 
     // If the phone account handle of the call is set, cache capability bit indicating whether
     // the phone account supports call subjects.
     PhoneAccountHandle newPhoneAccountHandle = mTelecomCall.getDetails().getAccountHandle();
     if (!Objects.equals(mPhoneAccountHandle, newPhoneAccountHandle)) {
+      LogUtil.i("DialerCall.updateFromTelecomCall ",
+            "phone account changed, newPhoneAccountHandle = " + newPhoneAccountHandle);
       mPhoneAccountHandle = newPhoneAccountHandle;
+      accountChanged = true;
 
       if (mPhoneAccountHandle != null) {
         PhoneAccount phoneAccount =
@@ -496,9 +614,42 @@ public class DialerCall implements VideoTechListener, StateChangedListener, Capa
         if (phoneAccount != null) {
           mIsCallSubjectSupported =
               phoneAccount.hasCapabilities(PhoneAccount.CAPABILITY_CALL_SUBJECT);
+          /// M: Update call provider lable if account changed. @{
+          // Cannot remove the null pointer check of callProviderLabel, beacuse getPhoneAccount is
+          // binder call, will cause lot of time if called frequence.
+          List<PhoneAccountHandle> accounts =
+              mContext.getSystemService(TelecomManager.class).getCallCapablePhoneAccounts();
+          if (accounts != null) {
+            if (accounts.size() > 1) {
+                callProviderLabel = phoneAccount.getLabel().toString();
+            } else {
+                LogUtil.d("DialerCall.updateFromTelecomCall ", "reset label");
+                callProviderLabel = null;
+            }
+          }
+          /// @}
+
+          /// M: Record sub id for post call. If not having any subid, we should not send post call.
+          //   And also need to give dialer the sub info. @{
+          mSubId = TelephonyManager.getDefault().getSubIdForPhoneAccount(phoneAccount);
+          /// @}
         }
+        /// M: ALPS03604515, ECC display wrong carrier name @{
+        else {
+            LogUtil.d("DialerCall.updateFromTelecomCall ", "phoneAccount==null");
+            callProviderLabel = null;
+        }
+        /// @}
       }
     }
+
+    /// M: ALPS03567937. Using telecom API to check if is voice mail will cost 30ms once.
+    // Update and save isVoiceNumber in dialercall. @{
+    if (handleChanged || accountChanged) {
+      updateIsVoiceMailNumber();
+    }
+    /// @}
+
   }
 
   /**
@@ -668,7 +819,21 @@ public class DialerCall implements VideoTechListener, StateChangedListener, Capa
   }
 
   public int getState() {
-    if (mTelecomCall != null && mTelecomCall.getParent() != null) {
+      /**
+       * M: Due to the AOSP original design, the IMS connection would report the conference
+       * participant to UI with state "new" but no parent when the participant connection was
+       * created. In this scenario, UI would make a mistake, it would regard this as a new
+       * outgoing-call had been triggered.
+       * In order to avoid this error case, if a call had the capability
+       * "PROPERTY_CONFERENCE_PARTICIPANT" and property "MTK_PROPERTY_VOLTE", it should be
+       * regarded as a conference children call.
+       *
+       * @{
+       */
+    if ((mTelecomCall != null && mTelecomCall.getParent() != null) ||
+        (hasProperty(MtkCall.MtkDetails.PROPERTY_CONFERENCE_PARTICIPANT) &&
+        hasProperty(MtkCall.MtkDetails.MTK_PROPERTY_VOLTE))) {
+        /** @} */
       return State.CONFERENCED;
     } else {
       return mState;
@@ -676,6 +841,20 @@ public class DialerCall implements VideoTechListener, StateChangedListener, Capa
   }
 
   public void setState(int state) {
+    /// M: [Modification for finishing Transparent InCall Screen if necessary]
+    /// such as:ALPS03748801,select sim press home key, show select again.
+    /// such as:ALPS02302461,occur JE when MT call arrive at some case. @{
+    if (state != State.SELECT_PHONE_ACCOUNT ||
+       mStateEx != State.WAIT_ACCOUNT_RESPONSE) {
+       mStateEx = state;
+    }
+    if (state == State.WAIT_ACCOUNT_RESPONSE) {
+        LogUtil.d(
+              "DialerCall.setState",
+              "ignore set SELECT_PHONE_ACCOUNT mStateEx: " + mStateEx);
+        return;
+    }
+    /// @}
     mState = state;
     if (mState == State.INCOMING) {
       mLogState.isIncoming = true;
@@ -906,8 +1085,10 @@ public class DialerCall implements VideoTechListener, StateChangedListener, Capa
             + "conferenceable:%s, videoState:%s, mSessionModificationState:%d, CameraDir:%s]",
         mId,
         State.toString(getState()),
-        Details.capabilitiesToString(mTelecomCall.getDetails().getCallCapabilities()),
-        Details.propertiesToString(mTelecomCall.getDetails().getCallProperties()),
+        /// M: Use MtkDetail to dump more capability and property. @{
+        MtkDetails.capabilitiesToStringShort(mTelecomCall.getDetails().getCallCapabilities()),
+        MtkDetails.propertiesToStringShort(mTelecomCall.getDetails().getCallProperties()),
+        /// @}
         mChildCallIds,
         getParentId(),
         this.mTelecomCall.getConferenceableCalls(),
@@ -1325,6 +1506,10 @@ public class DialerCall implements VideoTechListener, StateChangedListener, Capa
     public static final int CONNECTING = 13; /* Waiting for Telecom broadcast to finish */
     public static final int BLOCKED = 14; /* The number was found on the block list */
     public static final int PULLING = 15; /* An external call being pulled to the device */
+    /// M: [Modification for finishing Transparent InCall Screen if necessary]
+    /// such as:ALPS02302461,occur JE when MT call arrive at some case. @{
+    public static final int WAIT_ACCOUNT_RESPONSE = 100;
+    /// @}
 
     public static boolean isConnectingOrConnected(int state) {
       switch (state) {
@@ -1346,6 +1531,20 @@ public class DialerCall implements VideoTechListener, StateChangedListener, Capa
     public static boolean isDialing(int state) {
       return state == DIALING || state == PULLING || state == REDIALING;
     }
+
+    /// M: ALPS03534466. In some case, the call may remain in connecting status for long time.
+    // Should give user another chance to go back to incall screen. Also show statusbar notifier
+    // when call is in connecting status. @{
+    public static boolean isConnecting(int state) {
+      return state == CONNECTING;
+    }
+    /// @}
+
+    /// M: add for judge incoming call sate. @{
+    public static boolean isIncomingOrWaiting(int state) {
+        return state == INCOMING || state == CALL_WAITING;
+    }
+    /// @}
 
     public static String toString(int state) {
       switch (state) {
@@ -1381,6 +1580,11 @@ public class DialerCall implements VideoTechListener, StateChangedListener, Capa
           return "CONNECTING";
         case BLOCKED:
           return "BLOCKED";
+        /// M: [Modification for finishing Transparent InCall Screen if necessary]
+        /// such as:ALPS02302461,occur JE when MT call arrive at some case. @{
+        case WAIT_ACCOUNT_RESPONSE:
+          return "WAIT_ACCOUNT_RESPONSE";
+        /// @}
         default:
           return "UNKNOWN";
       }
@@ -1552,4 +1756,458 @@ public class DialerCall implements VideoTechListener, StateChangedListener, Capa
   public interface CannedTextResponsesLoadedListener {
     void onCannedTextResponsesLoaded(DialerCall call);
   }
+
+  /// M: ----------------- MediaTek features --------------------
+  /**
+   * M: For management of video call features.
+   */
+  private VideoFeatures mVideoFeatures;
+  /// M: add isHidePreview to record user click hidepreview  button
+  // when device rotate, we should accord to this state to restore. @{
+  private boolean isHidePreview = false;
+
+  /// M: Check details change to increase performance. @{
+  private Call.Details mDetails;
+  /// @}
+
+  /// M: Record sub id for post call. If not having any subid, we should not send post call.
+  //   And also need to give dialer the sub info. @{
+  private int mSubId = SubscriptionManager.INVALID_SUBSCRIPTION_ID;
+  /// @}
+
+  /// M: ALPS03567937. Using telecom API to check if is voice mail will cost 30ms once.
+  // Update and save isVoiceNumber in dialercall. @{
+  private boolean mIsVoiceMail;
+  /// @}
+
+  public boolean isHidePreview() {
+      return isHidePreview;
+  }
+
+  public void setHidePreview(boolean isHidePreview) {
+      this.isHidePreview = isHidePreview;
+  }
+  ///@}
+
+  /**
+   * M: For management of video call features.
+   * @return video features manager.
+   */
+  public VideoFeatures getVideoFeatures() {
+      return mVideoFeatures;
+  }
+
+  @Override
+  public void onDowngradeToAudio() {
+    VideoSessionController.getInstance().onDowngradeToAudio(this);
+  }
+
+  @Override
+  public void onCallSessionEvent(int event) {
+      if (MtkVideoProvider.SESSION_EVENT_ERROR_CAMERA_CRASHED == event) {
+          onCameraError(event);
+        /// M: start 20 seconds timer for cancel upgrade @ {
+      } else if (VideoSessionController.SESSION_EVENT_NOTIFY_START_TIMER_20S == event) {
+        if (getVideoTech().getSessionModificationState() ==
+            SessionModificationState.WAITING_FOR_UPGRADE_TO_VIDEO_RESPONSE
+            && getVideoFeatures().supportsCancelUpgradeVideo()) {
+          LogUtil.i("DialerCall.onCallSessionEvent", "start timer for cancel");
+          VideoSessionController.getInstance().startTimingForAutoDecline(this);
+        }
+        /// @}
+      }
+  }
+
+  /**
+   * M: Call back when camera error happened.
+   */
+  private void onCameraError(int errorCode) {
+      LogUtil.e("DialerCall.onCameraError", "Camera session error: %d, Call: %s",
+          errorCode, this.toString());
+      if (!VideoProfile.isVideo(getVideoState())) {
+          return;
+      }
+      /// M: this will trigger call button ui don't show upgrade to video button
+      getVideoFeatures().setCameraErrorHappened(true);
+      //always downgrade to audio when camera error because 3G VT phase out
+      getVideoTech().downgradeToAudio();
+      //reset hide preview flag
+      setHidePreview(false);
+      //show message for downgrade
+      InCallPresenter.getInstance().showMessage(com.android.incallui.
+          R.string.video_call_downgrade_request);
+  }
+
+  public void onCallDataUsageChanged(long dataUsage) {
+    InCallPresenter.getInstance().onCallDataUsageChanged(dataUsage);
+  }
+
+  /**
+   * M: get details of the call. Wrapper for mTelecomCall.getDetails().
+   * @return
+   */
+  public android.telecom.Call.Details getDetails() {
+      if (mTelecomCall != null) {
+          return mTelecomCall.getDetails();
+      } else {
+          LogUtil.d("DialerCall.getDetails", "mTelecomCall is null, need check!");
+          return null;
+      }
+  }
+
+  /**
+   * M: for VOLTE @{
+   * This function used to check whether certain info has been changed, if changed, handle them.
+   * @param newDetails
+   */
+  private void handleDetailsChanged(android.telecom.Call.Details newDetails) {
+      CallDetailChangeHandler.getInstance().onCallDetailChanged(this, mDetails, newDetails);
+  }
+  /***@}**/
+
+  /**
+   * M: check whether the call is marked as Ecc by NW.
+   * @return
+   */
+  public boolean isVolteMarkedEcc() {
+      boolean isVolteEmerencyCall = false;
+      isVolteEmerencyCall = InCallUIVolteUtils.isVolteMarkedEcc(getDetails());
+      return isVolteEmerencyCall;
+  }
+
+  /**
+   * M: get pau field received from NW.
+   * @return
+   */
+  public String getVoltePauField() {
+      String voltePauField = "";
+      voltePauField = InCallUIVolteUtils.getVoltePauField(getDetails());
+      return voltePauField;
+  }
+
+  /**
+   * M: handle children change, notify member add or leave, only for VoLTE conference call.
+   * Note: call this function before update() in onChildrenChanged(),
+   * for mChildCallIds used here will be changed in update()
+   */
+  private void handleChildrenChanged() {
+      LogUtil.d("DialerCall.handleChildrenChanged", "start .... ");
+      if (!InCallUIVolteUtils.isVolteSupport() ||
+              !hasProperty(mediatek.telecom.MtkCall.MtkDetails.MTK_PROPERTY_VOLTE)) {
+          // below feature is only for VoLTE conference, so skip if not VoLTE conference.
+          return;
+      }
+      List<String> newChildrenIds = new ArrayList<String>();
+      for (int i = 0; i < mTelecomCall.getChildren().size(); i++) {
+          newChildrenIds.add(
+                  CallList.getInstance().getCallByTelecomCall(
+                          mTelecomCall.getChildren().get(i)).getId());
+      }
+      ConferenceChildrenChangeHandler.getInstance()
+              .handleChildrenChanged(mChildCallIds, newChildrenIds);
+  }
+
+  /**
+   * Query phone recording state.
+   */
+  public boolean isRecording() {
+    return hasProperty(MtkCall.MtkDetails.MTK_PROPERTY_VOICE_RECORDING);
+  }
+
+  /**
+   * M: This function translates call state to status string for conference
+   * caller.
+   * @param context The Context object for the call.
+   * @return call status to show
+   */
+  public String getCallStatusFromState(Context context) {
+      LogUtil.d("DialerCall.getCallStatusFromState", "mState: " + mState);
+      String callStatus = "";
+      switch (mState) {
+          case State.ACTIVE:
+              callStatus = context.getString(R.string.call_status_online);
+              break;
+          case State.ONHOLD:
+              callStatus = context.getString(R.string.call_status_onhold);
+              break;
+          case State.DIALING:
+          case State.REDIALING:
+              callStatus = context.getString(R.string.call_status_dialing);
+              break;
+          case State.DISCONNECTING:
+              callStatus = context.getString(R.string.call_status_disconnecting);
+              break;
+          case State.DISCONNECTED:
+              callStatus = context.getString(R.string.call_status_disconnected);
+              break;
+          default:
+              LogUtil.v("DialerCall.getCallStatusFromState",
+                   "getCallStatusFromState() un-expected state: " + mState);
+              break;
+      }
+      return callStatus;
+  }
+  /// @}
+
+  /**
+   * M: get phone type from call.
+   * @return phone type
+   */
+  public int getPhoneTypeForCall() {
+    if (mSubId == SubscriptionManager.INVALID_SUBSCRIPTION_ID) {
+      return TelephonyManager.PHONE_TYPE_NONE;
+    }
+
+    TelephonyManager telephonyManager = mContext.getSystemService(TelephonyManager.class);
+    int phoneType = telephonyManager.getCurrentPhoneType(mSubId);
+    LogUtil.d("DialerCall.getPhoneTypeForCall", "subId: " + mSubId
+        + "phoneType: " + phoneType);
+    return phoneType;
+  }
+
+  /**
+   * M: get voice network type from call.
+   * @return voice network type
+   */
+  public int getVoiceNetworkTypeForCall() {
+    if (mSubId == SubscriptionManager.INVALID_SUBSCRIPTION_ID) {
+      return TelephonyManager.NETWORK_TYPE_UNKNOWN;
+    }
+
+    TelephonyManager telephonyManager = mContext.getSystemService(TelephonyManager.class);
+    int networkType = telephonyManager.getVoiceNetworkType(mSubId);
+    LogUtil.d("DialerCall.getVoiceNetworkTypeForCall", "subId: " + mSubId
+              + "networkType: " + networkType);
+    return networkType;
+  }
+
+  /**
+   * M: get phone type from call using network type.
+   * @return phone type
+   */
+  public int getPhoneTypeByNetworkType(int networkType) {
+    int phoneType = TelephonyManager.getPhoneType(networkType);
+    LogUtil.d("DialerCall.getPhoneTypeByNetworkType", "phoneType: " + phoneType);
+    return phoneType;
+  }
+
+  /**
+   * M: Print parnet call and child call id mapping to telecom id.
+   * @param call Parent call from telecom
+   * @param children Children call from telecom
+   */
+  private void printChildrenChanged(Call call, List<Call> children) {
+    String parentTelecomId = null;
+    String parentDialerCallId = null;
+    String parentIdMapping = null;
+    String childTelecomId = null;
+    String childDialerCallId = null;
+    List<String> childrenIdsMapping = null;
+
+    if (call != null) {
+      parentTelecomId = call.getDetails().getTelecomCallId();
+      DialerCall parentDialerCall = mDialerCallDelegate.getDialerCallFromTelecomCall(call);
+      if (parentDialerCall != null) {
+        parentDialerCallId = parentDialerCall.getId();
+      }
+      parentIdMapping = parentDialerCallId + "->" + parentTelecomId;
+    }
+
+    if (children != null) {
+      childrenIdsMapping = new ArrayList<String>();
+      for (int i = 0; i < children.size(); i++) {
+        Call child = children.get(i);
+        childTelecomId = child.getDetails().getTelecomCallId();
+        DialerCall childDialerCall = mDialerCallDelegate.getDialerCallFromTelecomCall(child);
+        if (childDialerCall != null) {
+          childDialerCallId = childDialerCall.getId();
+        }
+        childrenIdsMapping.add(childDialerCallId + "->" + childTelecomId);
+      }
+    }
+
+    String result = String.format(
+        Locale.US,
+        "[parent:%s, children:%s]",
+        parentIdMapping,
+        childrenIdsMapping);
+    LogUtil.i("DialerCall.printChildrenChanged", result);
+  }
+
+  /**
+   * M: Print parnet call and child call id mapping to telecom id.
+   * @param call Child call from telecom
+   * @param newParent Parent call from telecom
+   */
+  private void printParnetChanged(Call call, Call newParent) {
+    String parentTelecomId = null;
+    String parentDialerCallId = null;
+    String parentIdMapping = null;
+    String childTelecomId = null;
+    String childDialerCallId = null;
+    String childIdMapping = null;
+
+    if (call != null) {
+      childTelecomId = call.getDetails().getTelecomCallId();
+      DialerCall childDialerCall = mDialerCallDelegate.getDialerCallFromTelecomCall(call);
+      if (childDialerCall != null) {
+        childDialerCallId = childDialerCall.getId();
+      }
+      childIdMapping = childDialerCallId + "->" + childTelecomId;
+    }
+
+    if (newParent != null) {
+      parentTelecomId = newParent.getDetails().getTelecomCallId();
+      DialerCall parentDialerCall = mDialerCallDelegate.getDialerCallFromTelecomCall(newParent);
+      if (parentDialerCall != null) {
+        parentDialerCallId = parentDialerCall.getId();
+      }
+      parentIdMapping = parentDialerCallId + "->" + parentTelecomId;
+    }
+
+    String result = String.format(
+        Locale.US,
+        "[child:%s, parent:%s]",
+        childIdMapping,
+        parentIdMapping);
+    LogUtil.i("DialerCall.printParnetChanged", result);
+  }
+
+  /**
+   * M: For improving performance. In some cases, the call state isn't
+   * changes, so there is no need to update the UI. For example, end the call,
+   * InCallui had change the call state to DISCONNECTING, but the state of
+   * android.telecomCall is still active, so the new update from telecom would
+   * trigger the state change. This is no need, and affect the performance.
+   *
+   * @{
+   */
+  private void stateUpdate() {
+    /// M: ALPS03606286, using real state to check if call state changed.
+    // Can not update child call state using getState() API, because getState()
+    // always return State.CONFERENCED in conference call. Aways skip update. @{
+    int oldState = mState;
+    /// @}
+    updateFromTelecomCall();
+    if (oldState != mState) {
+      if (getState() == State.DISCONNECTED) {
+        for (DialerCallListener listener : mListeners) {
+          listener.onDialerCallDisconnect();
+        }
+      } else {
+        for (DialerCallListener listener : mListeners) {
+          listener.onDialerCallUpdate();
+        }
+      }
+      /// M: Check details change to increase performance. @{
+      mDetails = mTelecomCall.getDetails();
+      ///@}
+    } else {
+      LogUtil.i("DialerCall.stateUpdate, ignore this update", "mState :" + mState);
+    }
+  }
+  /** @} */
+
+   /**
+    * M: [Modification for finishing Transparent InCall Screen if necessary]
+    * such as:ALPS03748801,select sim press home key, show select again.
+    * such as:ALPS02302461,occur JE when MT call arrive at some case. @{
+    *
+    * @{
+    */
+  public int getStateEx() {
+     LogUtil.d(
+              "DialerCall.getStateEx",
+              "SELECT_PHONE_ACCOUNT, mStateEx:" + mStateEx);
+     return mStateEx;
+  }
+  /** @} */
+
+  /// M: Check details change to increase performance. @{
+  private boolean forceUpdateDetailByState() {
+    int oldState = getState();
+    final int translatedState = translateState(mTelecomCall.getState());
+    if (oldState != translatedState) {
+      LogUtil.d("forceUpdateDetailByState, ", "new state = " + translatedState);
+      return true;
+    }
+    return false;
+  }
+
+  private boolean skipUpdateDetails(Call.Details o, Call.Details n) {
+    if (o == null || n == null) {
+      LogUtil.d("skipUpdateDetails, ", "force to update detais");
+      return false;
+    }
+
+    return
+          Objects.equals(o.getHandle(), n.getHandle()) &&
+          Objects.equals(o.getHandlePresentation(), n.getHandlePresentation()) &&
+          Objects.equals(o.getCallerDisplayName(), n.getCallerDisplayName()) &&
+          Objects.equals(o.getCallerDisplayNamePresentation(),
+                  n.getCallerDisplayNamePresentation()) &&
+          Objects.equals(o.getAccountHandle(), n.getAccountHandle()) &&
+          Objects.equals(o.getCallCapabilities(), n.getCallCapabilities()) &&
+          Objects.equals(o.getCallProperties(), n.getCallProperties()) &&
+          Objects.equals(o.getDisconnectCause(), n.getDisconnectCause()) &&
+          Objects.equals(o.getConnectTimeMillis(), n.getConnectTimeMillis()) &&
+          Objects.equals(o.getGatewayInfo(), n.getGatewayInfo()) &&
+          Objects.equals(o.getVideoState(), n.getVideoState()) &&
+          Objects.equals(o.getStatusHints(), n.getStatusHints()) &&
+          areBundlesEqual(o.getExtras(), n.getExtras()) &&
+          areBundlesEqual(o.getIntentExtras(), n.getIntentExtras()) &&
+          Objects.equals(o.getCreationTimeMillis(), n.getCreationTimeMillis());
+  }
+
+  private static boolean areBundlesEqual(Bundle bundle, Bundle newBundle) {
+    if (bundle == null || newBundle == null) {
+      return bundle == newBundle;
+    }
+
+    if (bundle.size() != newBundle.size()) {
+      return false;
+    }
+
+    for(String key : bundle.keySet()) {
+      if (key != null) {
+        final Object value = bundle.get(key);
+        final Object newValue = newBundle.get(key);
+        if ((value != null && value instanceof Bundle) &&
+          (newValue != null && newValue instanceof Bundle)) {
+          return Objects.equals(((Bundle)value).toString(),
+              ((Bundle)newValue).toString());
+        } else if (!Objects.equals(value, newValue)) {
+          return false;
+        }
+      }
+    }
+    return true;
+  }
+  /// @}
+
+  /// M: Record sub id for post call. If not having any subid, we should not send post call.
+  //   And also need to give dialer the sub info. @{
+  public int getCallSubId() {
+    LogUtil.d("DialerCall.getCallSubId", "mSubId: " + mSubId);
+    return mSubId;
+  }
+  /// @}
+
+
+  /// M: ALPS03567937. Using telecom API to check if is voice mail will cost 30ms once.
+  // Update and save isVoiceNumber in dialercall. @{
+
+  /**
+   * M: Check if is voice mail number.
+   * @return if is voice mail number.
+   */
+  public boolean isVoiceMailNumber() {
+    return mIsVoiceMail;
+  }
+
+  private void updateIsVoiceMailNumber() {
+    mIsVoiceMail = CallerInfoUtils.isVoiceMailNumber(mContext, this);
+    LogUtil.i("DialerCall.updateIsVoiceMailNumber", "mIsVoiceMail = " + mIsVoiceMail);
+  }
+  /// @}
 }

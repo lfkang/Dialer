@@ -31,6 +31,11 @@ import com.android.incallui.audiomode.AudioModeProvider.AudioModeListener;
 import com.android.incallui.call.CallList;
 import com.android.incallui.call.DialerCall;
 
+//TINNO BEGIN
+// FEATURE_SMART_GESTURE chenqi.zhao 20180105
+import com.tinno.feature.FeatureMBA;
+//TINNO END
+
 /**
  * Class manages the proximity sensor for the in-call UI. We enable the proximity sensor while the
  * user in a phone call. The Proximity sensor turns off the touchscreen and display when the user is
@@ -55,10 +60,21 @@ public class ProximitySensor
   private boolean mIsAttemptingVideoCall;
   private boolean mIsVideoCall;
 
+  // TINNO BEGIN
+  // FEATURE_SMART_GESTURE chenqi.zhao 20180105
+  private Context mContext;
+  // TINNO END
+
   public ProximitySensor(
       @NonNull Context context,
       @NonNull AudioModeProvider audioModeProvider,
       @NonNull AccelerometerListener accelerometerListener) {
+
+    // TINNO BEGIN
+    // FEATURE_SMART_GESTURE chenqi.zhao 20180105
+    mContext = context;
+    // TINNO END
+
     mPowerManager = (PowerManager) context.getSystemService(Context.POWER_SERVICE);
     if (mPowerManager.isWakeLockLevelSupported(PowerManager.PROXIMITY_SCREEN_OFF_WAKE_LOCK)) {
       mProximityWakeLock =
@@ -103,6 +119,18 @@ public class ProximitySensor
     // can also put the in-call screen in the INCALL state.
     boolean hasOngoingCall = InCallState.INCALL == newState && callList.hasLiveCall();
     boolean isOffhook = (InCallState.OUTGOING == newState) || hasOngoingCall;
+
+    //TINNO BEGIN
+    //FEATURE_SMARTGESTURE <口袋模式> chenqi.zhao 20180105
+    if (FeatureMBA.MBA_FTR_ApeSmartGesture_REQC1194) {
+      if ((android.provider.Settings.Secure.getInt(mContext.getContentResolver(),
+              "smartAction_enabled", 0) == 1)
+              && (1 == android.provider.Settings.Secure.getInt(mContext.getContentResolver(),
+              "promixy_incoming_call_enabled", 0))) {
+        isOffhook = (InCallState.INCALL == newState || InCallState.INCOMING == newState || InCallState.OUTGOING == newState);
+      }
+    }
+    //TINNO END
 
     DialerCall activeCall = callList.getActiveCall();
     boolean isVideoCall = activeCall != null && activeCall.isVideoCall();
@@ -170,7 +198,7 @@ public class ProximitySensor
         LogUtil.i("ProximitySensor.turnOnProximitySensor", "acquiring wake lock");
         mProximityWakeLock.acquire();
       } else {
-        LogUtil.i("ProximitySensor.turnOnProximitySensor", "wake lock already acquired");
+        LogUtil.d("ProximitySensor.turnOnProximitySensor", "wake lock already acquired");
       }
     }
   }
@@ -182,7 +210,7 @@ public class ProximitySensor
         int flags = (screenOnImmediately ? 0 : PowerManager.RELEASE_FLAG_WAIT_FOR_NO_PROXIMITY);
         mProximityWakeLock.release(flags);
       } else {
-        LogUtil.i("ProximitySensor.turnOffProximitySensor", "wake lock already released");
+        LogUtil.d("ProximitySensor.turnOffProximitySensor", "wake lock already released");
       }
     }
   }

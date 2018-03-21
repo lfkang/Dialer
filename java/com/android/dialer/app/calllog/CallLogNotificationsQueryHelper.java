@@ -45,6 +45,7 @@ import java.util.List;
 /** Helper class operating on call log notifications. */
 public class CallLogNotificationsQueryHelper {
 
+  private static final String TAG = "CallLogNotifHelper";
   private final Context mContext;
   private final NewCallsQuery mNewCallsQuery;
   private final ContactInfoHelper mContactInfoHelper;
@@ -171,6 +172,7 @@ public class CallLogNotificationsQueryHelper {
    */
   public ContactInfo getContactInfo(
       @Nullable String number, int numberPresentation, @Nullable String countryIso) {
+    LogUtil.i(TAG, "getContactInfo begie number:" + number);
     if (countryIso == null) {
       countryIso = mCurrentCountryIso;
     }
@@ -179,19 +181,24 @@ public class CallLogNotificationsQueryHelper {
     ContactInfo contactInfo = new ContactInfo();
     contactInfo.number = number;
     contactInfo.formattedNumber = PhoneNumberUtils.formatNumber(number, countryIso);
+    LogUtil.i(TAG, "getContactInfo formattedNumber got");
     // contactInfo.normalizedNumber is not PhoneNumberUtils.normalizeNumber. Read ContactInfo.
     contactInfo.normalizedNumber = PhoneNumberUtils.formatNumberToE164(number, countryIso);
+    LogUtil.i(TAG, "getContactInfo normalizedNumber got");
 
     // 1. Special number representation.
     contactInfo.name =
         PhoneNumberDisplayUtil.getDisplayName(mContext, number, numberPresentation, false)
             .toString();
+    LogUtil.i(TAG, "getContactInfo name got");
     if (!TextUtils.isEmpty(contactInfo.name)) {
       return contactInfo;
     }
+    LogUtil.i(TAG, "getContactInfo normalizedNumber got1");
 
     // 2. Look it up in the cache.
     ContactInfo cachedContactInfo = mContactInfoHelper.lookupNumber(number, countryIso);
+    LogUtil.i(TAG, "getContactInfo cachedContactInfo got");
 
     if (cachedContactInfo != null && !TextUtils.isEmpty(cachedContactInfo.name)) {
       return cachedContactInfo;
@@ -310,10 +317,12 @@ public class CallLogNotificationsQueryHelper {
         if (cursor == null) {
           return null;
         }
+        LogUtil.i(TAG, "query finish, wait create new cal from cursor.TYPE:" + type);
         List<NewCall> newCalls = new ArrayList<>();
         while (cursor.moveToNext()) {
           newCalls.add(createNewCallsFromCursor(cursor));
         }
+        LogUtil.i(TAG, "query finish, create new cal from cursor end");
         return newCalls;
       } catch (RuntimeException e) {
         LogUtil.w(

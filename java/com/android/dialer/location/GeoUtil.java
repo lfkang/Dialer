@@ -17,6 +17,7 @@
 package com.android.dialer.location;
 
 import android.content.Context;
+import android.util.Log;
 import com.google.i18n.phonenumbers.NumberParseException;
 import com.google.i18n.phonenumbers.PhoneNumberUtil;
 import com.google.i18n.phonenumbers.Phonenumber;
@@ -25,11 +26,16 @@ import java.util.Locale;
 
 /** Static methods related to Geo. */
 public class GeoUtil {
+    private static final String TAG = "GeoUtil";
 
   /** @return the ISO 3166-1 two letters country code of the country the user is in. */
   public static String getCurrentCountryIso(Context context) {
     // The {@link CountryDetector} should never return null so this is safe to return as-is.
-    return CountryDetector.getInstance(context).getCurrentCountryIso();
+        /// M:add some log for location debugging @{
+        String iso = CountryDetector.getInstance(context).getCurrentCountryIso();
+        Log.d(TAG, "getCurrentCountryIso=" + iso);
+        /// @}
+        return iso;
   }
 
   public static String getGeocodedLocationFor(Context context, String phoneNumber) {
@@ -39,7 +45,12 @@ public class GeoUtil {
       final Phonenumber.PhoneNumber structuredPhoneNumber =
           phoneNumberUtil.parse(phoneNumber, getCurrentCountryIso(context));
       final Locale locale = context.getResources().getConfiguration().locale;
-      return geocoder.getDescriptionForNumber(structuredPhoneNumber, locale);
+      /// M: add some log for location debugging @{
+      String location = geocoder.getDescriptionForNumber(structuredPhoneNumber, locale);
+      Log.d(TAG, "location=" + location + ", structuredPhoneNumber=" +
+              structuredPhoneNumber + ", locale=" + locale + ", phoneNumber=" + phoneNumber);
+      return location;
+      /// @}
     } catch (NumberParseException e) {
       return null;
     }

@@ -14,7 +14,12 @@
      limitations under the License.
 -->
 <menu xmlns:android="http://schemas.android.com/apk/res/android">
-
+  <!-- M: [VoLTE ConfCall] volte conference call menu. @{ -->
+  <item
+    android:id="@+id/menu_volte_conf_call"
+    android:title="@string/confCall"
+    android:showAsAction="withText" />
+  <!-- @} -->
   <item
     android:id="@+id/menu_2s_pause"
     android:showAsAction="withText"

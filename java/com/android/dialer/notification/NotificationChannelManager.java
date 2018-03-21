@@ -51,6 +51,7 @@ public final class NotificationChannelManager {
    *       <ul>
    */
   public static void initChannels(@NonNull Context context) {
+    LogUtil.i("NotificationChannelManager.initChannels", "start...");
     Assert.checkArgument(BuildCompat.isAtLeastO());
     Assert.isNotNull(context);
 
@@ -59,6 +60,7 @@ public final class NotificationChannelManager {
     Set<String> existingChannelIds = getAllExistingChannelIds(context);
 
     if (desiredChannelIds.equals(existingChannelIds)) {
+      LogUtil.i("NotificationChannelManager.initChannels", "return 1");
       return;
     }
     LogUtil.i(
@@ -85,6 +87,7 @@ public final class NotificationChannelManager {
     createMissedCallChannel(context);
     createDefaultChannel(context);
     VoicemailChannelUtils.createAllChannels(context);
+    LogUtil.i("NotificationChannelManager.initChannels", "end ...");
   }
 
   @NonNull

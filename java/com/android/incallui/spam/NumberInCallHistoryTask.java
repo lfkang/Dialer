@@ -60,6 +60,7 @@ public class NumberInCallHistoryTask extends AsyncTask<Void, Void, Integer> {
       return;
     }
     AsyncTaskExecutor asyncTaskExecutor = AsyncTaskExecutors.createThreadPoolExecutor();
+    LogUtil.d("NumberInCallHistoryTask.submitTask", "AsyncTaskExecutor.submit.");
     asyncTaskExecutor.submit(TASK_ID, this);
   }
 
@@ -96,6 +97,7 @@ public class NumberInCallHistoryTask extends AsyncTask<Void, Void, Integer> {
 
   @Override
   public void onPostExecute(@CallHistoryStatus Integer callHistoryStatus) {
+    LogUtil.d("NumberInCallHistoryTask.onPostExecute", "AsyncTaskExecutor.Finish.");
     listener.onComplete(callHistoryStatus);
   }
 

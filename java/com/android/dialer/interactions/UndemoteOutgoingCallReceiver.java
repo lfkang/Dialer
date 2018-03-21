@@ -27,6 +27,7 @@ import android.net.Uri;
 import android.provider.ContactsContract.PhoneLookup;
 import android.provider.ContactsContract.PinnedPositions;
 import android.text.TextUtils;
+import com.android.dialer.common.LogUtil;
 import com.android.dialer.util.PermissionsUtil;
 
 /**
@@ -38,16 +39,20 @@ import com.android.dialer.util.PermissionsUtil;
 public class UndemoteOutgoingCallReceiver extends BroadcastReceiver {
 
   private static final long NO_CONTACT_FOUND = -1;
+  private static final String TAG = "UndemoteOutgoingCallReceiver";
 
   @Override
   public void onReceive(final Context context, Intent intent) {
+    LogUtil.i(TAG, "onReceive, intent = " + intent);
     if (!PermissionsUtil.hasPermission(context, READ_CONTACTS)
         || !PermissionsUtil.hasPermission(context, WRITE_CONTACTS)) {
+      LogUtil.i(TAG, "No read write permission, return");
       return;
     }
     if (intent != null && Intent.ACTION_NEW_OUTGOING_CALL.equals(intent.getAction())) {
       final String number = intent.getStringExtra(Intent.EXTRA_PHONE_NUMBER);
       if (TextUtils.isEmpty(number)) {
+        LogUtil.i(TAG, "Number is empty, return");
         return;
       }
       new Thread() {
@@ -60,6 +65,7 @@ public class UndemoteOutgoingCallReceiver extends BroadcastReceiver {
         }
       }.start();
     }
+    LogUtil.i(TAG, "onReceive end");
   }
 
   private void undemoteContactWithId(Context context, long id) {

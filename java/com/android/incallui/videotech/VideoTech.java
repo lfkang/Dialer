@@ -69,6 +69,12 @@ public interface VideoTech {
 
   void setDeviceOrientation(int rotation);
 
+  /// M: MediaTek new features. @{
+  void downgradeToAudio();
+  /// M: add for cancel upgrade feature.
+  void cancelUpgradeVideoRequest();
+  /// @}
+
   /** Listener for video call events. */
   interface VideoTechListener {
 
@@ -83,5 +89,13 @@ public interface VideoTech {
     void onVideoUpgradeRequestReceived();
 
     void onUpgradedToVideo(boolean switchToSpeaker);
+
+    /// M: mediatek features. @{
+    /// M: add for downgrade by peer or NW case.
+    void onDowngradeToAudio();
+    void onCallSessionEvent(int event);
+    // VideoDebugInfo show data usage.
+    void onCallDataUsageChanged(long dataUsage);
+    /// @}
   }
 }

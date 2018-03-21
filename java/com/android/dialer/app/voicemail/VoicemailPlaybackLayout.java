@@ -33,6 +33,7 @@ import android.widget.TextView;
 import com.android.dialer.app.R;
 import com.android.dialer.app.calllog.CallLogAsyncTaskUtil;
 import com.android.dialer.app.calllog.CallLogListItemViewHolder;
+import com.android.dialer.calllogutils.PhoneCallDetails;
 import com.android.dialer.logging.DialerImpression;
 import com.android.dialer.logging.Logger;
 import java.util.Objects;
@@ -85,7 +86,7 @@ public class VoicemailPlaybackLayout extends LinearLayout
           // When the undo button is pressed, the viewHolder we have is no longer valid because when
           // we hide the view it is binded to something else, and the layout is not updated for
           // hidden items. copy the adapter position so we can update the view upon undo.
-          // TODO: refactor this so the view holder will always be valid.
+          // TODO(twyen): refactor this so the view holder will always be valid.
           final int adapterPosition = mViewHolder.getAdapterPosition();
 
           mPresenter.pausePlayback();
@@ -348,6 +349,11 @@ public class VoicemailPlaybackLayout extends LinearLayout
   @Override
   public void onDeleteVoicemail() {
     mPresenter.onVoicemailDeletedInDatabase();
+  }
+
+  /// M: [Dialer Global Search] add onGetCallDetails
+  @Override
+  public void onGetCallDetails(PhoneCallDetails[] details) {
   }
 
   private String getString(int resId) {

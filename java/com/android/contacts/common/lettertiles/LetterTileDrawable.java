@@ -50,7 +50,8 @@ public class LetterTileDrawable extends Drawable {
    * #TYPE_BUSINESS}, and voicemail contacts should use {@link #TYPE_VOICEMAIL}.
    */
   @Retention(RetentionPolicy.SOURCE)
-  @IntDef({TYPE_PERSON, TYPE_BUSINESS, TYPE_VOICEMAIL, TYPE_GENERIC_AVATAR, TYPE_SPAM})
+  @IntDef({TYPE_PERSON, TYPE_BUSINESS, TYPE_VOICEMAIL, TYPE_GENERIC_AVATAR, TYPE_SPAM,
+      TYPE_CONFERENCE_CALL })
   public @interface ContactType {}
 
   /** Contact type constants */
@@ -66,6 +67,8 @@ public class LetterTileDrawable extends Drawable {
   public static final int TYPE_CONFERENCE = 6;
   @ContactType public static final int TYPE_DEFAULT = TYPE_PERSON;
 
+  /// M: [VoLTE ConfCalllog] For conference call
+  public static final int TYPE_CONFERENCE_CALL = TYPE_CONFERENCE;
   /**
    * Shape indicates the letter tile shape. It can be either a {@link #SHAPE_CIRCLE}, otherwise, it
    * is a {@link #SHAPE_RECTANGLE}.
@@ -93,20 +96,21 @@ public class LetterTileDrawable extends Drawable {
   private final char[] mFirstChar = new char[1];
 
   /** Letter tile */
-  @NonNull private final TypedArray mColors;
+  private final TypedArray mColors;
 
   private final int mSpamColor;
   private final int mDefaultColor;
   private final int mTileFontColor;
   private final float mLetterToTileRatio;
-  @NonNull private final Drawable mDefaultPersonAvatar;
-  @NonNull private final Drawable mDefaultBusinessAvatar;
-  @NonNull private final Drawable mDefaultVoicemailAvatar;
-  @NonNull private final Drawable mDefaultSpamAvatar;
-  @NonNull private final Drawable mDefaultConferenceAvatar;
+  private final Drawable mDefaultPersonAvatar;
+  private final Drawable mDefaultBusinessAvatar;
+  private final Drawable mDefaultVoicemailAvatar;
+  private final Drawable mDefaultSpamAvatar;
+  private final Drawable mDefaultConferenceAvatar;
+
 
   @ContactType private int mContactType = TYPE_DEFAULT;
-  private float mScale = 1.0f;
+  protected float mScale = 1.0f;
   private float mOffset = 0.0f;
   private boolean mIsCircle = false;
 
@@ -397,6 +401,17 @@ public class LetterTileDrawable extends Drawable {
 
     this.mDisplayName = displayName;
     setContactType(contactType);
+
+    /// M: [VoLTE ConfCallLog] @{
+    if(contactType == TYPE_CONFERENCE_CALL) {
+      if (identifierForTileColor != null) {
+        this.setLetterAndColorFromContactDetails(null, identifierForTileColor);
+      } else {
+        this.setLetterAndColorFromContactDetails(null, displayName);
+      }
+      return this;
+    }
+    ///@}
 
     // Special contact types receive default color and no letter tile, but special iconography.
     if (contactType != TYPE_PERSON) {

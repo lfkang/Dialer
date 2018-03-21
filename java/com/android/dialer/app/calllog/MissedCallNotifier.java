@@ -62,6 +62,8 @@ public class MissedCallNotifier implements Worker<Pair<Integer, String>, Void> {
   static final String NOTIFICATION_TAG_PREFIX = "MissedCall_";
   static final String NOTIFICATION_GROUP = "MissedCall";
   private static final int NOTIFICATION_ID = 1;
+  /// M: max show 5 miss call notification, more than 5, will show count only.
+  private static final int NOTIFICATION_COUNT_MAX = 5;
 
   private final Context context;
   private final CallLogNotificationsQueryHelper callLogNotificationsQueryHelper;
@@ -98,8 +100,9 @@ public class MissedCallNotifier implements Worker<Pair<Integer, String>, Void> {
   void updateMissedCallNotification(int count, @Nullable String number) {
     final int titleResId;
     CharSequence expandedText; // The text in the notification's line 1 and 2.
-
+    LogUtil.i("MissedCallNotifier.updateMissedCallNotification", "getNewMissedCalls begine");
     List<NewCall> newCalls = callLogNotificationsQueryHelper.getNewMissedCalls();
+    LogUtil.i("MissedCallNotifier.updateMissedCallNotification", "getNewMissedCalls end");
 
     if ((newCalls != null && newCalls.isEmpty()) || count == 0) {
       // No calls to notify about: clear the notification.
@@ -130,6 +133,7 @@ public class MissedCallNotifier implements Worker<Pair<Integer, String>, Void> {
 
     Notification.Builder groupSummary = createNotificationBuilder();
     boolean useCallList = newCalls != null;
+    LogUtil.i("MissedCallNotifier.updateMissedCallNotification", "createNotificationBuilder end");
 
     if (count == 1) {
       NewCall call =
@@ -150,6 +154,7 @@ public class MissedCallNotifier implements Worker<Pair<Integer, String>, Void> {
       ContactInfo contactInfo =
           callLogNotificationsQueryHelper.getContactInfo(
               call.number, call.numberPresentation, call.countryIso);
+      LogUtil.i("MissedCallNotifier.updateMissedCallNotification", "count 1 getContactInfo end");
       titleResId =
           contactInfo.userType == ContactsUtils.USER_TYPE_WORK
               ? R.string.notification_missedWorkCallTitle
@@ -174,6 +179,16 @@ public class MissedCallNotifier implements Worker<Pair<Integer, String>, Void> {
       titleResId = R.string.notification_missedCallsTitle;
       expandedText = context.getString(R.string.notification_missedCallsMsg, count);
     }
+    LogUtil.i("MissedCallNotifier.updateMissedCallNotification",
+              "createNotificationBuilder begine");
+
+    /// M: max show 5 miss call notification, notification will show count only
+    /// when miss call count more than 5. To improve miss call perfemance and fix anr.
+    if (useCallList && count > NOTIFICATION_COUNT_MAX) {
+        LogUtil.i("MissedCallNotifier.updateMissedCallNotification", "count > 5, clear miss call");
+        cancelAllMissedCallNotifications(context);
+    }
+    ///@}
 
     // Create a public viewable version of the notification, suitable for display when sensitive
     // notification content is hidden.
@@ -184,6 +199,8 @@ public class MissedCallNotifier implements Worker<Pair<Integer, String>, Void> {
         .setDeleteIntent(
             CallLogNotificationsService.createCancelAllMissedCallsPendingIntent(context));
 
+    LogUtil.i("MissedCallNotifier.updateMissedCallNotification",
+            "publicSummaryBuilder end");
     // Create the notification summary suitable for display when sensitive information is showing.
     groupSummary
         .setContentTitle(context.getText(titleResId))
@@ -197,28 +214,34 @@ public class MissedCallNotifier implements Worker<Pair<Integer, String>, Void> {
     if (BuildCompat.isAtLeastO()) {
       groupSummary.setChannelId(NotificationChannelId.MISSED_CALL);
     }
-
+    LogUtil.i("MissedCallNotifier.updateMissedCallNotification",
+            "groupSummary end");
     Notification notification = groupSummary.build();
     configureLedOnNotification(notification);
 
     LogUtil.i("MissedCallNotifier.updateMissedCallNotification", "adding missed call notification");
     getNotificationMgr().notify(getNotificationTagForGroupSummary(), NOTIFICATION_ID, notification);
 
-    if (useCallList) {
+    if (useCallList && count <= NOTIFICATION_COUNT_MAX) {
+      LogUtil.i("MissedCallNotifier.useCallList:", "begin");
       // Do not repost active notifications to prevent erasing post call notes.
       NotificationManager manager = getNotificationMgr();
       Set<String> activeTags = new ArraySet<>();
       for (StatusBarNotification activeNotification : manager.getActiveNotifications()) {
+        LogUtil.i("MissedCallNotifier.activeNotification.getTag():", activeNotification.getTag());
         activeTags.add(activeNotification.getTag());
       }
+      LogUtil.i("MissedCallNotifier.useCallList:", "end");
 
       for (NewCall call : newCalls) {
         String callTag = getNotificationTagForCall(call);
         if (!activeTags.contains(callTag)) {
+          LogUtil.i("MissedCallNotifier !activeTags.contains(callTag)", callTag);
           manager.notify(callTag, NOTIFICATION_ID, getNotificationForCall(call, null));
         }
       }
     }
+    LogUtil.i("MissedCallNotifier.updateMissedCallNotification", "end");
   }
 
   public static void cancelAllMissedCallNotifications(@NonNull Context context) {
@@ -293,9 +316,11 @@ public class MissedCallNotifier implements Worker<Pair<Integer, String>, Void> {
 
   private Notification getNotificationForCall(
       @NonNull NewCall call, @Nullable String postCallMessage) {
+    LogUtil.i("getNotificationForCall11", "getNotificationForCall call.number =" + call.number);
     ContactInfo contactInfo =
         callLogNotificationsQueryHelper.getContactInfo(
             call.number, call.numberPresentation, call.countryIso);
+    LogUtil.i("getNotificationForCall", "contactInfo got");
 
     // Create a public viewable version of the notification, suitable for display when sensitive
     // notification content is hidden.
@@ -305,6 +330,7 @@ public class MissedCallNotifier implements Worker<Pair<Integer, String>, Void> {
             : R.string.notification_missedCallTitle;
     Notification.Builder publicBuilder =
         createNotificationBuilder(call).setContentTitle(context.getText(titleResId));
+    LogUtil.i("getNotificationForCall", "createNotificationBuilder before");
 
     Notification.Builder builder = createNotificationBuilder(call);
     CharSequence expandedText;
@@ -323,6 +349,8 @@ public class MissedCallNotifier implements Worker<Pair<Integer, String>, Void> {
           context.getString(R.string.post_call_notification_message, expandedText, postCallMessage);
     }
 
+    LogUtil.i("getNotificationForCall", "278 ContactPhotoLoader before");
+
     ContactPhotoLoader loader = new ContactPhotoLoader(context, contactInfo);
     Bitmap photoIcon = loader.loadPhotoIcon();
     if (photoIcon != null) {
@@ -337,8 +365,11 @@ public class MissedCallNotifier implements Worker<Pair<Integer, String>, Void> {
         // sensitive notification information.
         .setPublicVersion(publicBuilder.build());
 
+    LogUtil.i("getNotificationForCall", "295 isUserUnlocked before");
+
     // Add additional actions when the user isn't locked
     if (UserManagerCompat.isUserUnlocked(context)) {
+      LogUtil.i("getNotificationForCall", "isUserUnlocked");
       if (!TextUtils.isEmpty(call.number)
           && !TextUtils.equals(call.number, context.getString(R.string.handle_restricted))) {
         builder.addAction(
@@ -358,8 +389,10 @@ public class MissedCallNotifier implements Worker<Pair<Integer, String>, Void> {
         }
       }
     }
+    LogUtil.i("getNotificationForCall", "builder.build begine");
 
     Notification notification = builder.build();
+    LogUtil.i("getNotificationForCall", "builder.build end");
     configureLedOnNotification(notification);
     return notification;
   }

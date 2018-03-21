@@ -16,8 +16,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
   coreApp="true"
   package="com.android.dialer"
-  android:versionCode="150000"
-  android:versionName="11.0">
+  android:versionCode="160000"
+  android:versionName="12.0">
 
   <uses-sdk
     android:minSdkVersion="23"
@@ -35,6 +35,7 @@
   <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
   <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
   <uses-permission android:name="android.permission.INTERNET"/>
+  <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
   <uses-permission android:name="android.permission.PROCESS_OUTGOING_CALLS"/>
   <uses-permission android:name="android.permission.NFC"/>
   <uses-permission android:name="android.permission.READ_PHONE_STATE"/>
@@ -101,14 +102,22 @@
   <!--for OPPO-->
   <uses-permission android:name="com.oppo.launcher.permission.READ_SETTINGS"/>
   <uses-permission android:name="com.oppo.launcher.permission.WRITE_SETTINGS"/>
+  <!-- M: for phone account change -->
+  <uses-permission android:name="android.permission.PROCESS_PHONE_ACCOUNT_REGISTRATION" />
 
   <application
+    android:backupAgent='com.android.dialer.backup.DialerBackupAgent'
+    android:fullBackupOnly="true"
+    android:restoreAnyVersion="true"
     android:hardwareAccelerated="true"
     android:icon="@mipmap/ic_launcher_phone"
     android:label="@string/applicationLabel"
     android:name="com.android.dialer.binary.aosp.AospDialerApplication"
     android:supportsRtl="true"
     android:usesCleartextTraffic="false">
+
+
+
   </application>
 
 </manifest>

@@ -16,7 +16,7 @@
 
 package com.android.dialer.app.calllog;
 
-import static android.Manifest.permission.READ_CALL_LOG;
+//import static android.Manifest.permission.READ_CALL_LOG;
 
 import android.app.Activity;
 import android.app.Fragment;
@@ -25,6 +25,7 @@ import android.content.Context;
 import android.content.pm.PackageManager;
 import android.database.ContentObserver;
 import android.database.Cursor;
+import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Message;
@@ -38,6 +39,8 @@ import android.support.v13.app.FragmentCompat.OnRequestPermissionsResultCallback
 import android.support.v7.app.AppCompatActivity;
 import android.support.v7.widget.LinearLayoutManager;
 import android.support.v7.widget.RecyclerView;
+import android.text.TextUtils;
+import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.View.OnClickListener;
@@ -68,8 +71,15 @@ import com.android.dialer.phonenumbercache.ContactInfoHelper;
 import com.android.dialer.util.PermissionsUtil;
 import com.android.dialer.widget.EmptyContentView;
 import com.android.dialer.widget.EmptyContentView.OnEmptyViewActionButtonClickedListener;
-import java.util.Arrays;
+import com.mediatek.dialer.calllog.CallLogSearchResultActivity;
+import com.mediatek.dialer.ext.ExtensionManager;
+import com.mediatek.dialer.calllog.PhoneAccountInfoHelper;
+import com.mediatek.dialer.calllog.PhoneAccountInfoHelper.AccountInfoListener;
+import com.mediatek.dialer.util.DialerConstants;
+import com.mediatek.dialer.util.DialerFeatureOptions;
+import com.mediatek.dialer.util.VvmUtils;
 
+import java.util.Arrays;
 /**
  * Displays a list of call log entries. To filter for a particular kind of call (all, missed or
  * voicemails), specify it in the constructor.
@@ -95,6 +105,10 @@ public class CallLogFragment extends Fragment
   // No date-based filtering.
   private static final int NO_DATE_LIMIT = 0;
 
+  /** M: request full group permissions instead of READ_CALL_LOG,
+   * Because MTK changed the group permissions granting logic.
+   */
+  private static final String[] READ_CALL_LOG = PermissionsUtil.PHONE_FULL_GROUP;
   private static final int PHONE_PERMISSIONS_REQUEST_CODE = 1;
 
   private static final int EVENT_UPDATE_DISPLAY = 1;
@@ -283,6 +297,10 @@ public class CallLogFragment extends Fragment
 
       mScrollToTop = false;
     }
+
+    /** M:  [Dialer Global Search] notify search activity update search result. @{*/
+    updateSearchResultIfNeed(cursor);
+    /** @}*/
     return true;
   }
 
@@ -380,6 +398,10 @@ public class CallLogFragment extends Fragment
   public void onViewCreated(View view, Bundle savedInstanceState) {
     super.onViewCreated(view, savedInstanceState);
     updateEmptyMessage(mCallTypeFilter);
+
+    /// M: Add account select for plugin. @{
+    ExtensionManager.getCallLogExtension().onViewCreated(this, view);
+    /// @}
   }
 
   @Override
@@ -441,6 +463,7 @@ public class CallLogFragment extends Fragment
 
     getActivity().getContentResolver().unregisterContentObserver(mCallLogObserver);
     getActivity().getContentResolver().unregisterContentObserver(mContactsObserver);
+
     super.onDestroy();
   }
 
@@ -459,9 +482,15 @@ public class CallLogFragment extends Fragment
 
   @Override
   public void fetchCalls() {
-    mCallLogQueryHandler.fetchCalls(mCallTypeFilter, mDateLimit);
-    if (!mIsCallLogActivity) {
-      ((ListsFragment) getParentFragment()).updateTabUnreadCounts();
+    /** M: [Dialer Global Search] Displays a list of call log entries @{ */
+    if (isQueryMode()) {
+      startSearchCalls(mQueryData);
+    } else {
+    /** @} */
+      mCallLogQueryHandler.fetchCalls(mCallTypeFilter, mDateLimit);
+      if (!mIsCallLogActivity) {
+        ((ListsFragment) getParentFragment()).updateTabUnreadCounts();
+      }
     }
   }
 
@@ -477,6 +506,10 @@ public class CallLogFragment extends Fragment
       return;
     }
 
+    ///M: For plugin to get the empty message Id @{
+    filterType = ExtensionManager.getCallLogExtension().getFilterType(filterType);
+    ///@}
+
     final int messageId;
     switch (filterType) {
       case Calls.MISSED_TYPE:
@@ -486,8 +519,19 @@ public class CallLogFragment extends Fragment
         messageId = R.string.call_log_voicemail_empty;
         break;
       case CallLogQueryHandler.CALL_TYPE_ALL:
+        /** M: [Dialer Global Search] Search mode with customer empty string. */
+        messageId = isQueryMode() ? R.string.noMatchingCalllogs
+            : R.string.call_log_all_empty;
+        /** @} */
+        break;
+      /** M: [CallLog Incoming and Outgoing Filter] @{ */
+      case Calls.INCOMING_TYPE:
         messageId = R.string.call_log_all_empty;
         break;
+      case Calls.OUTGOING_TYPE:
+        messageId = R.string.call_log_all_empty;
+        break;
+      /** @} */
       default:
         throw new IllegalArgumentException(
             "Unexpected filter type in CallLogFragment: " + filterType);
@@ -534,6 +578,10 @@ public class CallLogFragment extends Fragment
       // Refresh the display of the existing data to update the timestamp text descriptions.
       mAdapter.notifyDataSetChanged();
     }
+
+    /// M: Add account select for plugin. @{
+    ExtensionManager.getCallLogExtension().updateNotice(this);
+    /// @}
   }
 
   @Override
@@ -686,4 +734,68 @@ public class CallLogFragment extends Fragment
       mRefreshDataRequired = true;
     }
   }
+
+  /// M: [Multi-Delete] For CallLog delete @{
+  @Override
+  public void onCallsDeleted() {
+      // Do nothing
+  }
+  /// @}
+
+  /**
+   * M: [Dialer Global Search] Displays a list of call log entries.
+   * CallLogSearch activity reused CallLogFragment.  @{
+   */
+  // Default null, while in search mode it is not null.
+  private String mQueryData = null;
+
+  /**
+   * Use it to inject search data.
+   * This is the entrance of call log search mode.
+   * @param query
+   */
+  public void setQueryData(String query) {
+    mQueryData = query;
+    mAdapter.setQueryString(query);
+  }
+
+  private void startSearchCalls(String query) {
+    Uri uri = Uri.withAppendedPath(DialerConstants.CALLLOG_SEARCH_URI_BASE, query);
+    /// support search Voicemail calllog
+    uri = VvmUtils.buildVvmAllowedUri(uri);
+    mCallLogQueryHandler.fetchSearchCalls(uri);
+  }
+
+  private boolean isQueryMode() {
+    return !TextUtils.isEmpty(mQueryData) && DialerFeatureOptions.DIALER_GLOBAL_SEARCH;
+  }
+
+  private void updateSearchResultIfNeed(Cursor result) {
+    if (isQueryMode() && getActivity() instanceof CallLogSearchResultActivity) {
+      int count = result != null ? result.getCount() : 0;
+      ((CallLogSearchResultActivity) getActivity()).updateSearchResult(count);
+    }
+  }
+
+  public int getItemCount() {
+    return mAdapter.getItemCount();
+  }
+  /** @} */
+
+  /**
+   * M : force refresh calllog data
+   */
+  public void forceToRefreshData() {
+    mRefreshDataRequired = true;
+    // / M: for ALPS01683374
+    // refreshData only when CallLogFragment is in foreground
+    if (isResumed()) {
+      refreshData();
+      // refreshData would cause ContactInfoCache.invalidate
+      // and cache thread starting would be stopped seldom.
+      // we have to call adapter onResume again to start cache thread.
+      mAdapter.onResume();
+    }
+  }
+  ///@}
 }

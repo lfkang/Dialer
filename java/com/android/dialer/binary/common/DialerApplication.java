@@ -17,31 +17,46 @@
 package com.android.dialer.binary.common;
 
 import android.app.Application;
+import android.content.Context;
 import android.os.StrictMode;
 import android.os.Trace;
 import android.support.annotation.NonNull;
 import android.support.v4.os.BuildCompat;
+import android.telecom.TelecomManager;
 import com.android.dialer.blocking.BlockedNumbersAutoMigrator;
 import com.android.dialer.blocking.FilteredNumberAsyncQueryHandler;
 import com.android.dialer.buildtype.BuildType;
 import com.android.dialer.calllog.CallLogComponent;
+import com.android.dialer.common.LogUtil;
 import com.android.dialer.common.concurrent.DefaultDialerExecutorFactory;
 import com.android.dialer.inject.HasRootComponent;
 import com.android.dialer.notification.NotificationChannelManager;
 import com.android.dialer.persistentlog.PersistentLogger;
+import com.android.internal.annotations.VisibleForTesting;
+import com.mediatek.contacts.simcontact.GlobalEnv;
+import com.mediatek.dialer.ext.ExtensionManager;
 
 /** A common application subclass for all Dialer build variants. */
 public abstract class DialerApplication extends Application implements HasRootComponent {
 
   private volatile Object rootComponent;
+  ///M: For Call pull feature
+  private static Context sContext;
 
   @Override
   public void onCreate() {
     Trace.beginSection("DialerApplication.onCreate");
+    LogUtil.i("DialerApplication.onCreate", "start ...");
+    ///M: For Call pull feature
+    sContext = this;
     if (BuildType.get() == BuildType.BUGFOOD) {
       enableStrictMode();
     }
     super.onCreate();
+
+    /// M: For plug-in @{
+    ExtensionManager.init(this);
+
     new BlockedNumbersAutoMigrator(
             this.getApplicationContext(),
             new FilteredNumberAsyncQueryHandler(this),
@@ -53,8 +68,19 @@ public abstract class DialerApplication extends Application implements HasRootCo
     if (BuildCompat.isAtLeastO()) {
       NotificationChannelManager.initChannels(this);
     }
+
+    /// M:init GlobalEnv for mediatek ContactsCommon
+    GlobalEnv.setApplicationContext(getApplicationContext());
+
     Trace.endSection();
+    LogUtil.i("DialerApplication.onCreate", "end ...");
   }
+
+   ///M: For Call pull feature @{
+   public static Context getContext() {
+      return sContext;
+   }
+   ///@}
 
   private void enableStrictMode() {
     StrictMode.setThreadPolicy(
@@ -86,4 +112,21 @@ public abstract class DialerApplication extends Application implements HasRootCo
     }
     return result;
   }
+
+  /// M: use to override system real service start @{
+  private TelecomManager mTelecomManager;
+
+  @Override
+  public Object getSystemService(String name) {
+    if (Context.TELECOM_SERVICE.equals(name) && mTelecomManager != null) {
+      return mTelecomManager;
+    }
+    return super.getSystemService(name);
+  }
+
+  @VisibleForTesting
+  public void setTelecomManager(TelecomManager telecom) {
+    mTelecomManager = telecom;
+  };
+  /// M: end @}
 }

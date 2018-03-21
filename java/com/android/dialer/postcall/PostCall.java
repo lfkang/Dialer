@@ -23,6 +23,7 @@ import android.content.SharedPreferences;
 import android.support.annotation.Nullable;
 import android.support.design.widget.BaseTransientBottomBar.BaseCallback;
 import android.support.design.widget.Snackbar;
+import android.telephony.SmsManager;
 import android.telephony.TelephonyManager;
 import android.view.View;
 import android.view.View.OnClickListener;
@@ -146,7 +147,8 @@ public class PostCall {
         .apply();
   }
 
-  public static void onCallDisconnected(Context context, String number, long callConnectedMillis) {
+  public static void onCallDisconnected(Context context,
+    String number, long callConnectedMillis, int subId) {
     DialerUtils.getDefaultSharedPreferenceForDeviceProtectedStorageContext(context)
         .edit()
         .putLong(KEY_POST_CALL_CALL_CONNECT_TIME, callConnectedMillis)
@@ -204,7 +206,9 @@ public class PostCall {
         && binding.getLong("postcall_last_call_threshold", 30_000) > timeSinceDisconnect
         && (connectTimeMillis == 0
             || binding.getLong("postcall_call_duration_threshold", 35_000) > callDurationMillis)
-        && getPhoneNumber(context) != null;
+        && getPhoneNumber(context) != null
+        /// M: if default sms subscription id is not set, dont show send message view
+        && isSetDefaultSmsSubscriptionId();
   }
 
   private static boolean shouldPromptUserToViewSentMessage(Context context) {
@@ -226,4 +230,17 @@ public class PostCall {
     return context.getSystemService(TelephonyManager.class).getSimState()
         == TelephonyManager.SIM_STATE_READY;
   }
+
+  /// M: if default sms subscription id is not set, dont show send message view
+  private static boolean isSetDefaultSmsSubscriptionId() {
+    SmsManager smsManager = SmsManager.getDefault();
+    int subId = SmsManager.getDefaultSmsSubscriptionId();
+    LogUtil.i("PostCall.isSetDefaultSmsSubscriptionId subId = ",String.valueOf(subId) );
+        if (subId < 0) {
+            return false;
+        } else {
+            return true;
+        }
+  }
+  /// @}
 }

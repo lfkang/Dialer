@@ -178,4 +178,10 @@ public class ContactInfo {
         + geoDescription
         + '}';
   }
+
+  /// M:[MTK SIM Contacts feature] @{
+  //-1 indicates phone contacts, >0 indicates sim id for sim contacts.
+  public int contactSimId;
+  public int isSdnContact;
+  ///@}
 }

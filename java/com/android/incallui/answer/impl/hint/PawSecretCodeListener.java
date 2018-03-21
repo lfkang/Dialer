@@ -59,7 +59,14 @@ public class PawSecretCodeListener extends BroadcastReceiver {
   @Override
   public void onReceive(Context context, Intent intent) {
     String host = intent.getData().getHost();
-    Assert.checkState(!TextUtils.isEmpty(host));
+    /// M: ALPS03479708 host may be null. @{
+    /// Assert.checkState(!TextUtils.isEmpty(host));
+    if (TextUtils.isEmpty(host)) {
+      LogUtil.i("PawSecretCodeListener.onReceive", "host empty");
+      return;
+    }
+    /// @}
+
     String secretCode =
         ConfigProviderBindings.get(context).getString(CONFIG_PAW_SECRET_CODE, "729");
     if (secretCode == null) {

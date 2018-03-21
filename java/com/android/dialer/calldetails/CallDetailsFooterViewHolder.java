@@ -32,7 +32,7 @@ import com.android.dialer.util.CallUtil;
 import com.android.dialer.util.DialerUtils;
 
 /** ViewHolder container for {@link CallDetailsActivity} footer. */
-final class CallDetailsFooterViewHolder extends RecyclerView.ViewHolder implements OnClickListener {
+public final class CallDetailsFooterViewHolder extends RecyclerView.ViewHolder implements OnClickListener {
 
   private final ReportCallIdListener listener;
   private final View container;
@@ -42,7 +42,7 @@ final class CallDetailsFooterViewHolder extends RecyclerView.ViewHolder implemen
 
   private String number;
 
-  CallDetailsFooterViewHolder(View view, ReportCallIdListener listener) {
+  public CallDetailsFooterViewHolder(View view, ReportCallIdListener listener) {
     super(view);
     this.listener = listener;
     container = view.findViewById(R.id.footer_container);
@@ -63,6 +63,15 @@ final class CallDetailsFooterViewHolder extends RecyclerView.ViewHolder implemen
       reportCallerId.setVisibility(View.VISIBLE);
     }
   }
+
+  /** M: ALPS03512910, if edit view not show in the context menu of CalLogListItme,
+        then it will not show there.@{ */
+  public void canEditNumberBeforeCall(boolean isShow) {
+    if (edit != null) {
+        edit.setVisibility(isShow ? View.VISIBLE:View.GONE);
+    }
+  }
+  /** @} */
 
   @Override
   public void onClick(View view) {

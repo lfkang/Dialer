@@ -19,14 +19,19 @@ import android.content.Context;
 import android.database.Cursor;
 import android.net.Uri;
 import android.text.TextUtils;
+import android.view.View;
+import android.view.View.OnClickListener;
+import android.widget.QuickContactBadge;
 import com.android.contacts.common.ContactsUtils;
 import com.android.contacts.common.compat.DirectoryCompat;
+import com.android.contacts.common.list.ContactListItemView;
 import com.android.contacts.common.list.DirectoryPartition;
 import com.android.dialer.phonenumbercache.CachedNumberLookupService;
 import com.android.dialer.phonenumbercache.CachedNumberLookupService.CachedContactInfo;
 import com.android.dialer.phonenumbercache.ContactInfo;
 import com.android.dialer.phonenumberutil.PhoneNumberHelper;
 import com.android.dialer.util.CallUtil;
+import com.android.dialer.util.DialerUtils;
 
 /** List adapter to display regular search results. */
 public class RegularSearchListAdapter extends DialerPhoneNumberListAdapter {
@@ -79,6 +84,24 @@ public class RegularSearchListAdapter extends DialerPhoneNumberListAdapter {
     }
     return cacheInfo;
   }
+
+  @Override
+  ///M: Add for fix ALPS03629886, quickContact.setOnClickListener to hide
+  //imput method @{
+  protected void bindView(View itemView, int partition, Cursor cursor, int position) {
+       super.bindView(itemView, partition, cursor, position);
+       ContactListItemView view = (ContactListItemView) itemView;
+       QuickContactBadge quickContact = view.getQuickContact();
+       quickContact.setOnClickListener(new OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                DialerUtils.hideInputMethod(itemView);
+                quickContact.onClick(v);
+                return;
+            }
+        });
+  }
+  /// @}
 
   @Override
   public String getFormattedQueryString() {

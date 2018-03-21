@@ -105,6 +105,8 @@ public class PhoneFavoritesTileAdapter extends BaseAdapter implements OnDragDrop
   /** New position of the temporarily entered contact in the cache. */
   private int mDragEnteredEntryIndex = -1;
 
+  /// M: add to fix 3502025.
+  private static final int DISPLAY_NAME = 1;
   private boolean mAwaitingRemove = false;
   private boolean mDelayCursorUpdates = false;
   private ContactPhotoManager mPhotoManager;
@@ -209,7 +211,12 @@ public class PhoneFavoritesTileAdapter extends BaseAdapter implements OnDragDrop
       int photoUriColumn = cursor.getColumnIndexOrThrow(Contacts.PHOTO_URI);
       int lookupKeyColumn = cursor.getColumnIndexOrThrow(Contacts.LOOKUP_KEY);
       int pinnedColumn = cursor.getColumnIndexOrThrow(Contacts.PINNED);
-      int nameColumn = cursor.getColumnIndexOrThrow(Contacts.DISPLAY_NAME_PRIMARY);
+      /// M: add to fix 3502025. @{
+      /// DISPLAY_NAME Column will be modified by DISPLAY_NAME_ALTERNATIVE column for query,
+      /// so do not query DISPLAY_NAME column index.
+      int nameColumn = DISPLAY_NAME;
+      //int nameColumn = cursor.getColumnIndexOrThrow(Contacts.DISPLAY_NAME_PRIMARY);
+      /// @}
       int nameAlternativeColumn = cursor.getColumnIndexOrThrow(Contacts.DISPLAY_NAME_ALTERNATIVE);
       int isDefaultNumberColumn = cursor.getColumnIndexOrThrow(Phone.IS_SUPER_PRIMARY);
       int phoneTypeColumn = cursor.getColumnIndexOrThrow(Phone.TYPE);
@@ -557,7 +564,7 @@ public class PhoneFavoritesTileAdapter extends BaseAdapter implements OnDragDrop
    * due to sync or modifications by third party apps.
    */
   @VisibleForTesting
-  private void arrangeContactsByPinnedPosition(ArrayList<ContactEntry> toArrange) {
+  /*private*/ void arrangeContactsByPinnedPosition(ArrayList<ContactEntry> toArrange) {
     final PriorityQueue<ContactEntry> pinnedQueue =
         new PriorityQueue<>(PIN_LIMIT, mContactEntryComparator);
 

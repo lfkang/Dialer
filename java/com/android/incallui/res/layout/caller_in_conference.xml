@@ -91,6 +91,20 @@
 
   </LinearLayout>
 
+  <!--M: add for volte conferrence member status begin, overlap with "Separate"-->
+  <TextView android:id="@+id/conferenceCallerStatus"
+      android:layout_width="@dimen/conference_call_manager_button_dimension"
+      android:layout_height="@dimen/conference_call_manager_button_dimension"
+      android:scaleType="center"
+      android:contentDescription="@string/goPrivate"
+      android:tint="@color/conference_call_manager_icon_color"
+      android:gravity="center_vertical"
+      android:textColor="#696969"
+      android:singleLine="true"
+      android:ellipsize="marquee"
+      android:visibility="gone" />
+  <!-- add for volte conferrence member status end-->
+
   <!-- "Separate" (i.e. "go private") button for this caller -->
   <ImageView
     android:id="@+id/conferenceCallerSeparate"

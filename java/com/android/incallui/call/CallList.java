@@ -40,12 +40,17 @@ import com.android.dialer.logging.Logger;
 import com.android.dialer.shortcuts.ShortcutUsageReporter;
 import com.android.dialer.spam.Spam;
 import com.android.dialer.spam.SpamBindings;
+import com.android.incallui.Log;
+import com.android.incallui.call.TelecomAdapter;
 import com.android.incallui.call.DialerCall.State;
 import com.android.incallui.latencyreport.LatencyReport;
 import com.android.incallui.util.TelecomCallUtil;
 import com.android.incallui.videotech.utils.SessionModificationState;
+
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -357,6 +362,9 @@ public class CallList implements DialerCallDelegate {
       LogUtil.i("CallList.onIncoming", String.valueOf(call));
     }
 
+    ///M:add for Dual ringing of DSDA. @{
+    updateIncomingCallList(call);
+    /// @}
     for (Listener listener : mListeners) {
       listener.onIncomingCall(call);
     }
@@ -451,6 +459,13 @@ public class CallList implements DialerCallDelegate {
   }
 
   public DialerCall getIncomingCall() {
+    /**
+     * M: [MSMA], get incoming call. Using for OP09Plugin. @{
+     */
+    if (mIncomingCallList.size() >= 1) {
+      return mIncomingCallList.get(0);
+    }
+    /** @} **/
     DialerCall call = getFirstCallWithState(DialerCall.State.INCOMING);
     if (call == null) {
       call = getFirstCallWithState(DialerCall.State.CALL_WAITING);
@@ -582,6 +597,9 @@ public class CallList implements DialerCallDelegate {
     if (updateCallInMap(call)) {
       LogUtil.i("CallList.onUpdateCall", String.valueOf(call));
     }
+    ///M:add for Dual ringing of DSDA. @{
+    updateIncomingCallList(call);
+    /// @}
   }
 
   /**
@@ -757,6 +775,9 @@ public class CallList implements DialerCallDelegate {
     public void onDialerCallDisconnect() {
       if (updateCallInMap(mCall)) {
         LogUtil.i("DialerCallListenerImpl.onDialerCallDisconnect", String.valueOf(mCall));
+        ///M:add for Dual ringing of DSDA. @{
+        updateIncomingCallList(mCall);
+        /// @}
         // notify those listening for all disconnects
         notifyListenersOfDisconnect(mCall);
       }
@@ -815,4 +836,128 @@ public class CallList implements DialerCallDelegate {
       }
     }
   }
+
+  /// M: ------------------- MediaTek feature ------------------------
+  ///M: add for MSMS feature.
+  private List<DialerCall> mIncomingCallList = new ArrayList<DialerCall>();
+  /**
+   * M: get the volte call which is sending upgrade video call.
+   * @return Call which is in upgrading progess
+   */
+  public DialerCall getSendingVideoUpgradeRequestCall() {
+      for (DialerCall call : mCallById.values()) {
+        if (call.getVideoTech().getSessionModificationState()
+            == SessionModificationState.WAITING_FOR_UPGRADE_TO_VIDEO_RESPONSE) {
+          return call;
+        }
+      }
+      return null;
+  }
+
+  /**
+   * M: get the volte call which is sending cancel upgrade video call.
+   * @return Call which is in canceling upgrade progess
+   */
+  public DialerCall getSendingCancelUpgradeRequestCall() {
+    for (DialerCall call : mCallById.values()) {
+      if (call.getVideoTech().getSessionModificationState()
+          == SessionModificationState.WAITING_FOR_CANCEL_UPGRADE_RESPONSE) {
+        return call;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * M: Get the number of the active and background calls.
+   * @return number of the calls with specified state.
+   */
+  public int getActiveAndHoldCallsCount() {
+      int count = 0;
+      if (getActiveCall() != null) {
+          count += 1;
+      }
+      if (getBackgroundCall() != null) {
+          count += 1;
+      }
+      if (getSecondBackgroundCall() != null) {
+          count += 1;
+      }
+      return count;
+  }
+
+  public DialerCall getCallByTelecomCall(android.telecom.Call telecomCall) {
+    return mCallByTelecomCall.get(telecomCall);
+  }
+
+  /**
+   * M: [MSMA], to update the incoming call list.
+   *@param call
+   */
+   private void updateIncomingCallList(DialerCall call) {
+       boolean isIncomingCallListChanged = false;
+       int state = call.getState();
+       if (DialerCall.State.isIncomingOrWaiting(state) && !mIncomingCallList.contains(call)) {
+           mIncomingCallList.add(0, call);
+           isIncomingCallListChanged = true;
+       } else if (!DialerCall.State.isIncomingOrWaiting(state)) {
+           Iterator<DialerCall> it = mIncomingCallList.iterator();
+           while (it.hasNext()) {
+               DialerCall oldCall = it.next();
+               if (DialerCall.areSame(oldCall, call)) {
+                   it.remove();
+                   isIncomingCallListChanged = true;
+               }
+           }
+       }
+
+       if (isIncomingCallListChanged) {
+           LogUtil.d("CallList.updateIncomingCallList (setSortedIncomingCallList) - ",
+               String.valueOf(call));
+           TelecomAdapter.getInstance().setSortedIncomingCallList(getIncomingCallIdList());
+       }
+   }
+
+   /**
+   * M: [MSMA], get incoming call id list.
+   *@return call id list.
+   */
+   private ArrayList<String> getIncomingCallIdList() {
+       final ArrayList<String> callIdList = new ArrayList<String>();
+       for (DialerCall call: mIncomingCallList) {
+           callIdList.add(call.getTelecomCall().getDetails().getTelecomCallId());
+       }
+       return callIdList;
+   }
+
+   /**
+   * M: [MSMA], get secondary incoming call.
+   *@return secondart incoming call.
+   */
+   public DialerCall getSecondaryIncomingCall() {
+       if (mIncomingCallList.size() >= 2) {
+           return mIncomingCallList.get(1);
+       }
+       return null;
+   }
+
+   /**
+   * M: [MSMA], switch incoming calls. Using for OP09Plugin to switch first
+   * and secondart incoming calls.
+   */
+   public void switchIncomingCalls() {
+       if (mIncomingCallList.size() >= 2) {
+           DialerCall call = mIncomingCallList.get(0);
+           mIncomingCallList.remove(0);
+           mIncomingCallList.add(1, call);
+       }
+
+       if (getIncomingCall() != null) {
+           for (Listener listener: mListeners) {
+               listener.onCallListChange(this);
+           }
+       }
+
+       TelecomAdapter.getInstance().setSortedIncomingCallList(getIncomingCallIdList());
+   }
 }

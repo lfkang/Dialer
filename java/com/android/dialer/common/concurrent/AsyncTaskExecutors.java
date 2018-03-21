@@ -19,6 +19,7 @@ package com.android.dialer.common.concurrent;
 import android.os.AsyncTask;
 import android.support.annotation.MainThread;
 import com.android.dialer.common.Assert;
+import com.android.dialer.common.LogUtil;
 import java.util.concurrent.Executor;
 
 /**
@@ -86,6 +87,7 @@ public final class AsyncTaskExecutors {
     @MainThread
     public <T> AsyncTask<T, ?, ?> submit(Object identifer, AsyncTask<T, ?, ?> task, T... params) {
       Assert.isMainThread();
+      LogUtil.d("SimpleAsyncTaskExecutor.submit", "executor:" + mExecutor + "params: " + params);
       return task.executeOnExecutor(mExecutor, params);
     }
   }

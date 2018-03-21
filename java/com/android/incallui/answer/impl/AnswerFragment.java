@@ -36,6 +36,7 @@ import android.support.annotation.Nullable;
 import android.support.annotation.StringRes;
 import android.support.annotation.VisibleForTesting;
 import android.support.v4.app.Fragment;
+import android.support.v4.app.FragmentTransaction;
 import android.text.TextUtils;
 import android.transition.TransitionManager;
 import android.view.LayoutInflater;
@@ -43,6 +44,7 @@ import android.view.View;
 import android.view.View.AccessibilityDelegate;
 import android.view.View.OnClickListener;
 import android.view.ViewGroup;
+import android.view.ViewTreeObserver;
 import android.view.ViewTreeObserver.OnGlobalLayoutListener;
 import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityNodeInfo;
@@ -57,6 +59,7 @@ import com.android.dialer.logging.DialerImpression;
 import com.android.dialer.logging.Logger;
 import com.android.dialer.multimedia.MultimediaData;
 import com.android.dialer.util.ViewUtil;
+import com.android.incallui.InCallPresenter;
 import com.android.incallui.answer.impl.CreateCustomSmsDialogFragment.CreateCustomSmsHolder;
 import com.android.incallui.answer.impl.SmsBottomSheetFragment.SmsSheetHolder;
 import com.android.incallui.answer.impl.affordance.SwipeButtonHelper.Callback;
@@ -64,11 +67,14 @@ import com.android.incallui.answer.impl.affordance.SwipeButtonView;
 import com.android.incallui.answer.impl.answermethod.AnswerMethod;
 import com.android.incallui.answer.impl.answermethod.AnswerMethodFactory;
 import com.android.incallui.answer.impl.answermethod.AnswerMethodHolder;
+import com.android.incallui.answer.impl.answermethod.FlingUpDownMethod;
 import com.android.incallui.answer.impl.utils.Interpolators;
 import com.android.incallui.answer.protocol.AnswerScreen;
 import com.android.incallui.answer.protocol.AnswerScreenDelegate;
 import com.android.incallui.answer.protocol.AnswerScreenDelegateFactory;
 import com.android.incallui.call.DialerCall.State;
+import com.android.incallui.call.CallList;
+import com.android.incallui.call.DialerCall;
 import com.android.incallui.contactgrid.ContactGridManager;
 import com.android.incallui.incall.protocol.ContactPhotoType;
 import com.android.incallui.incall.protocol.InCallScreen;
@@ -81,8 +87,12 @@ import com.android.incallui.maps.MapsComponent;
 import com.android.incallui.sessiondata.AvatarPresenter;
 import com.android.incallui.sessiondata.MultimediaFragment;
 import com.android.incallui.util.AccessibilityUtil;
+import com.android.incallui.video.impl.SwitchOnHoldCallController;
 import com.android.incallui.video.protocol.VideoCallScreen;
 import com.android.incallui.videotech.utils.VideoUtils;
+import com.mediatek.incallui.dsda.DsdaCallController;
+import com.mediatek.incallui.dsda.DsdaFragment;
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -392,9 +402,20 @@ public class AnswerFragment extends Fragment
       this.textResponses = new ArrayList<>(textResponses);
       secondaryButton.setVisibility(View.VISIBLE);
     }
+
+    /// M: Add for reject video call by SMS.
+    setTextResponsesForThirdButton(textResponses);
   }
 
   private void initSecondaryButton() {
+    /**
+     * M: [Video call]3G video call can't answer as voice, nor reject via SMS. @{
+     */
+    if (is3GVideoCall()) {
+        secondaryButton.setVisibility(View.INVISIBLE);
+        return;
+    }
+    /** @} */
     secondaryBehavior =
         isVideoCall() || isVideoUpgradeRequest()
             ? SecondaryBehavior.ANSWER_VIDEO_AS_AUDIO
@@ -438,6 +459,9 @@ public class AnswerFragment extends Fragment
       answerAndReleaseButton.setVisibility(View.INVISIBLE);
       answerScreenDelegate.onAnswerAndReleaseButtonDisabled();
     }
+
+    /// M: Add for reject video call by SMS.
+    initThirdButton();
   }
 
   @Override
@@ -499,6 +523,12 @@ public class AnswerFragment extends Fragment
   }
 
   private AnswerMethod getAnswerMethod() {
+    /// M: Check fragment is add to activity or not. @{
+    if (!isAdded()) {
+      LogUtil.i("AnswerFragment.getAnswerMethod", "Not added to Activity.");
+      return null;
+    }
+    /// @}
     return ((AnswerMethod)
         getChildFragmentManager().findFragmentById(R.id.answer_method_container));
   }
@@ -599,13 +629,40 @@ public class AnswerFragment extends Fragment
   }
 
   @Override
-  public void setSecondary(@NonNull SecondaryInfo secondaryInfo) {}
+  public void setSecondary(@NonNull SecondaryInfo secondaryInfo) {
+    LogUtil.i("AnswerFragment.setSecondary", secondaryInfo.toString());
+    /// M: DSDA show secondary incoming call in secondary info. @{
+    if (!isAdded() || mDsdaCallController == null) {
+      mSavedSecondaryInfo = secondaryInfo;
+      LogUtil.i("AnswerFragment.setSecondary", "UI not ready, skip it.");
+      return;
+    }
+    mSavedSecondaryInfo = null;
+    mDsdaCallController.setSecondaryInfo(secondaryInfo);
+    FragmentTransaction transaction = getChildFragmentManager().beginTransaction();
+    Fragment oldBanner = getChildFragmentManager().findFragmentById(R.id.incall_dsda_banner);
+    if (secondaryInfo.shouldShow) {
+      transaction.replace(R.id.incall_dsda_banner, DsdaFragment.newInstance(secondaryInfo));
+      LogUtil.i("AnswerFragment.setSecondary", "show....");
+    } else {
+      if (oldBanner != null) {
+        transaction.remove(oldBanner);
+        LogUtil.i("AnswerFragment.setSecondary", "hide....");
+      }
+    }
+    transaction.setCustomAnimations(R.anim.abc_slide_in_top, R.anim.abc_slide_out_top);
+    transaction.commitAllowingStateLoss();
+    /// @}
+  }
 
   @Override
   public void setCallState(@NonNull PrimaryCallState primaryCallState) {
     LogUtil.i("AnswerFragment.setCallState", primaryCallState.toString());
     this.primaryCallState = primaryCallState;
     contactGridManager.setCallState(primaryCallState);
+    /// M: Update answer and release button. @{
+    updateAnswerAndReleaseButton();
+    /// @}
   }
 
   @Override
@@ -685,6 +742,12 @@ public class AnswerFragment extends Fragment
                     importanceBadge.getPaddingTop(),
                     leftRightPadding,
                     importanceBadge.getPaddingBottom());
+                /// M: ALPS03711469 Remove the listener so we don't continually re-layout. @{
+                ViewTreeObserver observer = importanceBadge.getViewTreeObserver();
+                if (observer.isAlive()) {
+                  observer.removeOnGlobalLayoutListener(this);
+                }
+                /// @}
               }
             });
     updateImportanceBadgeVisibility();
@@ -715,6 +778,14 @@ public class AnswerFragment extends Fragment
       // These flags will suppress the alert that the activity is in full view mode
       // during an incoming call on a fresh system/factory reset of the app
       flags |= STATUS_BAR_DISABLE_BACK | STATUS_BAR_DISABLE_HOME | STATUS_BAR_DISABLE_RECENT;
+
+      ///M: ALPS03563079 refresh bounce animation again when go back to answerfragment.
+      // Disable fitsSystemWindows property as well. @{
+      View frameView = view.findViewById(R.id.incoming_frame_layout);
+      if (frameView != null) {
+        frameView.setFitsSystemWindows(false);
+      }
+      /// @}
     }
     view.setSystemUiVisibility(flags);
     if (isVideoCall() || isVideoUpgradeRequest()) {
@@ -729,6 +800,10 @@ public class AnswerFragment extends Fragment
       }
     }
 
+    /// M: DSDA. show secondary call info. @{
+    mDsdaContainer = view.findViewById(R.id.incall_dsda_banner);
+    mDsdaContainer.setClickable(true);
+    /// @}
     return view;
   }
 
@@ -755,6 +830,15 @@ public class AnswerFragment extends Fragment
     LogUtil.i("AnswerFragment.onResume", null);
     restoreSwipeHintTexts();
     inCallScreenDelegate.onInCallScreenResumed();
+    /// M: DSDA. @{
+    if (mSavedSecondaryInfo != null) {
+      setSecondary(mSavedSecondaryInfo);
+    }
+    /// @}
+
+    ///M: ALPS03563079 refresh bounce animation again when go back to answerfragment. @{
+    refreshBounceAnimation();
+    /// @}
   }
 
   @Override
@@ -777,6 +861,10 @@ public class AnswerFragment extends Fragment
     if (answerVideoCallScreen != null) {
       answerVideoCallScreen.onVideoScreenStop();
     }
+
+    ///M: ALPS03563079 refresh bounce animation again when go back to answerfragment. @{
+    mRefreshAnimation = true;
+    /// @}
   }
 
   @Override
@@ -954,9 +1042,14 @@ public class AnswerFragment extends Fragment
 
   private void showMessageMenu() {
     LogUtil.i("AnswerFragment.showMessageMenu", "Show sms menu.");
-    if (getChildFragmentManager().isDestroyed()) {
+    /// M: check Host exsit or not before show pop menu @{
+    if (!isAdded() || getChildFragmentManager().isDestroyed()) {
+      LogUtil.w(
+            "AnswerFragment.showMessageMenu",
+            "Host is not exsit when show sms menu. skipped");
       return;
     }
+    /// @}
 
     textResponsesFragment = SmsBottomSheetFragment.newInstance(textResponses);
     textResponsesFragment.show(getChildFragmentManager(), null);
@@ -1028,6 +1121,10 @@ public class AnswerFragment extends Fragment
     Assert.isNotNull(inCallScreenDelegate);
     inCallScreenDelegate.onInCallScreenDelegateInit(this);
     inCallScreenDelegate.onInCallScreenReady();
+
+    /// M: Support DSDA.
+    mDsdaCallController =
+        new DsdaCallController(mDsdaContainer, inCallScreenDelegate);
   }
 
   private void updateImportanceBadgeVisibility() {
@@ -1094,4 +1191,114 @@ public class AnswerFragment extends Fragment
       return false;
     }
   }
+
+  /// M: ------------------------------- MediaTek feature ---------------------------
+  private SecondaryInfo mSavedSecondaryInfo;
+  private View mDsdaContainer;
+  private DsdaCallController mDsdaCallController;
+
+  ///M: ALPS03563079 refresh bounce animation again when go back to answerfragment. @{
+  private boolean mRefreshAnimation = false;
+  /// @}
+
+  /// Add for 3G video call.
+  private boolean supportsAnswerAsVoice() {
+    String callId = getArguments().getString(ARG_CALL_ID);
+    CallList calllist = InCallPresenter.getInstance().getCallList();
+    if (TextUtils.isEmpty(callId) || calllist == null) {
+      /// default true
+      return true;
+    }
+    DialerCall call = calllist.getCallById(callId);
+    if (call == null) {
+      return true;
+    }
+    return call.getVideoFeatures().supportsAnswerAsVoice();
+  }
+
+  private boolean is3GVideoCall() {
+    return isVideoCall() && !supportsAnswerAsVoice();
+  }
+
+  /// Add for reject video call by SMS.
+  private boolean supportsRejectVideoCallBySms() {
+    String callId = getArguments().getString(ARG_CALL_ID);
+    CallList calllist = InCallPresenter.getInstance().getCallList();
+    if (TextUtils.isEmpty(callId) || calllist == null) {
+      /// default false
+      LogUtil.w("supportsRejectVideoCallBySms", "no callId or calllist");
+      return false;
+    }
+    DialerCall call = calllist.getCallById(callId);
+    if (call == null) {
+      LogUtil.w("supportsRejectVideoCallBySms", "no DialerCall");
+      return false;
+    }
+    return call.getVideoFeatures().supportsRejectVideoCallBySms();
+  }
+
+  private void setTextResponsesForThirdButton(List<String> textResponses) {
+    if (isVideoCall() && supportsRejectVideoCallBySms()) {
+      if (textResponses == null) {
+        LogUtil.i("setTextResponses", "no text responses, hiding third button");
+        this.textResponses = null;
+        answerAndReleaseButton.setVisibility(View.INVISIBLE);
+      } else if (ActivityCompat.isInMultiWindowMode(getActivity())) {
+        LogUtil.i("setTextResponses", "in multiwindow, hiding third button");
+        this.textResponses = null;
+        answerAndReleaseButton.setVisibility(View.INVISIBLE);
+      } else {
+        LogUtil.i("setTextResponses", "textResponses.size: " + textResponses.size());
+        this.textResponses = new ArrayList<>(textResponses);
+        answerAndReleaseButton.setVisibility(View.VISIBLE);
+      }
+    }
+  }
+
+  private void initThirdButton() {
+    if (isVideoCall() && supportsRejectVideoCallBySms()) {
+      answerAndReleaseBehavior = SecondaryBehavior.REJECT_WITH_SMS;
+      answerAndReleaseBehavior.applyToView(answerAndReleaseButton);
+      answerAndReleaseButton.setVisibility(View.VISIBLE);
+    }
+  }
+
+  /// M: Update answer and release button. @{
+  private void updateAnswerAndReleaseButton() {
+    if (allowAnswerAndRelease() && CallList.getInstance().getActiveCall() == null) {
+      LogUtil.i("AnswerFragment.updateAnswerAndReleaseButton", "hide....");
+      answerAndReleaseButton.setVisibility(View.INVISIBLE);
+      getArguments().putBoolean(ARG_ALLOW_ANSWER_AND_RELEASE, false);
+      restoreSwipeHintTexts();
+    } else if (hasCallOnHold() && CallList.getInstance().getBackgroundCall() == null) {
+      LogUtil.i("AnswerFragment.updateAnswerAndReleaseButton", "no hold call");
+      getArguments().putBoolean(ARG_HAS_CALL_ON_HOLD, false);
+      restoreSwipeHintTexts();
+    }
+  }
+  /// @}
+
+  /**
+   * M: show timer for video upgrade request.
+   */
+  @Override
+  public void updateDeclineTimer() {
+    contactGridManager.updateDeclineTimer();
+  }
+
+  ///M: ALPS03563079 refresh bounce animation again when go back to answerfragment. @{
+  private void refreshBounceAnimation() {
+    if (!mRefreshAnimation) {
+      return;
+    }
+
+    AnswerMethod method = getAnswerMethod();
+    if (method instanceof FlingUpDownMethod) {
+      FlingUpDownMethod flingMethod = (FlingUpDownMethod) method;
+      flingMethod.refreshBounceAnimation();
+      LogUtil.d("AnswerFragment.refreshBounceAnimation", null);
+    }
+    mRefreshAnimation = false;
+  }
+  /// @}
 }

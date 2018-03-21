@@ -128,7 +128,7 @@ public abstract class VvmNetworkRequestCallback extends ConnectivityManager.Netw
 
   @CallSuper
   public void onUnavailable() {
-    // TODO: b/32637799 this is hidden, do we really need this?
+    // TODO(twyen): b/32637799 this is hidden, do we really need this?
     mResultReceived = true;
     onFailed(NETWORK_REQUEST_FAILED_TIMEOUT);
   }
@@ -158,8 +158,17 @@ public abstract class VvmNetworkRequestCallback extends ConnectivityManager.Netw
   }
 
   public void releaseNetwork() {
-    VvmLog.d(TAG, "releaseNetwork");
+    /// M: fix issue: 3609765 @{
+    VvmLog.d(TAG, "releaseNetwork,mRequestSent: " + mRequestSent);
+    if (mRequestSent == false) {
+        VvmLog.e(TAG, "releaseNetwork() called twice");
+        return;
+      }
+    /// @}
     getConnectivityManager().unregisterNetworkCallback(this);
+    /// M: fix issue: 3609765 @{
+    mRequestSent = false;
+    /// @}
   }
 
   public ConnectivityManager getConnectivityManager() {

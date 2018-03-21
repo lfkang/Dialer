@@ -17,7 +17,7 @@
 <!-- The "Manage conference" UI.  This panel is displayed (instead of
      the inCallPanel) when the user clicks the "Manage conference"
      button while on a conference call. -->
-<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
   android:id="@+id/manageConferencePanel"
   android:layout_width="match_parent"
   android:layout_height="match_parent">
@@ -30,4 +30,24 @@
     android:focusable="true"
     android:focusableInTouchMode="true"
     android:listSelector="@null"/>
-</FrameLayout>
+   <!--M: add for volte conferrence add member button begin -->
+   <FrameLayout
+       android:id="@+id/floating_add_member_action_button_container"
+       android:layout_width="wrap_content"
+       android:layout_height="wrap_content"
+       android:layout_alignParentBottom="true"
+       android:layout_alignParentRight="true"
+       android:layout_marginBottom="16dp"
+       android:layout_marginRight="36dp"
+       android:visibility="gone" >
+
+       <ImageButton android:id="@+id/floating_add_member_action_button"
+           android:layout_width="wrap_content"
+           android:layout_height="wrap_content"
+           android:background="@drawable/mtk_volte_ic_conference_add_member_bkg"
+           android:src="@drawable/mtk_volte_ic_conference_add_member"
+           android:scaleType="center"
+           android:contentDescription="@string/addConferenceMemeberText" />
+    </FrameLayout>
+   <!-- add for volte conferrence add member button end-->
+</RelativeLayout>

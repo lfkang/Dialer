@@ -17,6 +17,10 @@ message DialerContact {
   optional string number_label = 8;
   optional int32 contact_type = 9;
   optional SimDetails sim_details = 10;
+  //M: add post digits
+  optional string post_dial_digits = 11;
+  //M: add can edit number before call for call detail footer
+  optional bool can_edit_number = 12;
 }
 
 message SimDetails {

@@ -34,10 +34,13 @@ import android.telephony.PhoneNumberUtils;
 import android.text.TextUtils;
 import com.android.contacts.common.ContactsUtils;
 import com.android.contacts.common.ContactsUtils.UserType;
+import com.android.dialer.location.GeoUtil;
+
 import com.android.contacts.common.util.TelephonyManagerUtils;
 import com.android.dialer.phonenumbercache.ContactInfoHelper;
 import com.android.dialer.phonenumbercache.PhoneLookupUtil;
 import com.android.dialer.phonenumberutil.PhoneNumberHelper;
+import com.mediatek.dialer.compat.ContactsCompat.PhoneCompat;
 
 /**
  * Looks up caller information for the given phone number. This is intermediate data and should NOT
@@ -241,8 +244,9 @@ public class CallerInfo {
           if (typeColumnIndex != -1) {
             info.numberType = cursor.getInt(typeColumnIndex);
             info.numberLabel = cursor.getString(columnIndex);
-            info.phoneLabel =
-                Phone.getTypeLabel(context.getResources(), info.numberType, info.numberLabel)
+            /// M: change to new API for AAS label lookup
+            info.phoneLabel = PhoneCompat.getTypeLabel(context,
+                    info.numberType, info.numberLabel)
                     .toString();
           }
         }
@@ -496,6 +500,9 @@ public class CallerInfo {
       // field.
       name = TelephonyManagerUtils.getVoiceMailAlphaTag(context);
       phoneNumber = null;
+      /// M: Add debug info for voice mail @{
+      Log.d(TAG, "getVoiceMailAlphaTag: ", name);
+      /// @}
     } catch (SecurityException se) {
       // Should never happen: if this process does not have
       // permission to retrieve VM tag, it should not have
@@ -523,7 +530,12 @@ public class CallerInfo {
    */
   public void updateGeoDescription(Context context, String fallbackNumber) {
     String number = TextUtils.isEmpty(phoneNumber) ? fallbackNumber : phoneNumber;
-    geoDescription = PhoneNumberHelper.getGeoDescription(context, number);
+    /// M:ALPS03478958 Caller info's location didn't display.Use a more robust function to get
+    ///geocoded location info @{
+    /// google original code:
+    ///geoDescription = PhoneNumberHelper.getGeoDescription(context, number);
+    geoDescription = GeoUtil.getGeocodedLocationFor(context, number);
+    /// @}
   }
 
   /** @return a string debug representation of this instance. */

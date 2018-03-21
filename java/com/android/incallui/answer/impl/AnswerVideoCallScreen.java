@@ -22,6 +22,7 @@ import android.support.annotation.NonNull;
 import android.support.v4.app.Fragment;
 import android.view.TextureView;
 import android.view.View;
+import android.view.View.OnLayoutChangeListener;
 import com.android.dialer.common.Assert;
 import com.android.dialer.common.FragmentUtils;
 import com.android.dialer.common.LogUtil;
@@ -54,6 +55,27 @@ public class AnswerVideoCallScreen implements VideoCallScreen {
 
     textureView.setVisibility(View.VISIBLE);
     overlayView.setVisibility(View.VISIBLE);
+
+    /// M: ALPS03676321, fix video stretched issue @{
+    textureView.addOnLayoutChangeListener(
+      new OnLayoutChangeListener() {
+        @Override
+        public void onLayoutChange(
+            View v,
+            int left,
+            int top,
+            int right,
+            int bottom,
+            int oldLeft,
+            int oldTop,
+            int oldRight,
+            int oldBottom) {
+              LogUtil.d("AnswerVideoCallScreen.OnLayoutChangeListener",
+                  "AnswerVideoCallScreen layout changed");
+              updatePreviewVideoScaling();
+          }
+        });
+    /// @}
   }
 
   @Override
@@ -134,5 +156,26 @@ public class AnswerVideoCallScreen implements VideoCallScreen {
   private boolean isLandscape() {
     return fragment.getResources().getConfiguration().orientation
         == Configuration.ORIENTATION_LANDSCAPE;
+  }
+
+  /// M: ----------- MediaTek features ---------------
+  @Override
+  public void hidePreview(boolean hide) {
+    /// Do nothing
+  }
+
+  @Override
+  public void updateVideoDebugInfo(long dataUsage) {
+    /// Do nothing
+  }
+
+  @Override
+  public int getDialpadContainerResourceId() {
+    return 0;
+  }
+
+  @Override
+  public void onVideoCallScreenDialpadVisibilityChange(boolean isShowing) {
+    /// Do nothing
   }
 }

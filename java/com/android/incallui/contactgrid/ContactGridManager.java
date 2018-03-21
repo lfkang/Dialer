@@ -34,9 +34,11 @@ import com.android.contacts.common.lettertiles.LetterTileDrawable;
 import com.android.dialer.common.Assert;
 import com.android.dialer.common.LogUtil;
 import com.android.dialer.util.DrawableConverter;
+import com.android.incallui.InCallPresenter;
 import com.android.incallui.incall.protocol.ContactPhotoType;
 import com.android.incallui.incall.protocol.PrimaryCallState;
 import com.android.incallui.incall.protocol.PrimaryInfo;
+import com.mediatek.incallui.plugin.ExtensionManager;
 import java.util.List;
 
 /** Utility to manage the Contact grid */
@@ -106,6 +108,10 @@ public class ContactGridManager {
     contactGridLayout = (View) contactNameTextView.getParent();
     letterTile = new LetterTileDrawable(context.getResources());
     isTimerStarted = false;
+
+    /// M: add for OP02 plugin. @{
+    ExtensionManager.getCallCardExt().onViewCreated(context, view);
+    /// @}
   }
 
   public void show() {
@@ -220,7 +226,11 @@ public class ContactGridManager {
       statusTextView.setVisibility(View.INVISIBLE);
       statusTextView.setText(null);
     } else {
-      statusTextView.setText(info.label);
+      /// M: Show timer for video upgrade request.@{
+      CharSequence countTimer = InCallPresenter.getInstance().appendCountdown(
+          info.label);
+      statusTextView.setText(countTimer);
+      /// @}
       statusTextView.setVisibility(View.VISIBLE);
       statusTextView.setSingleLine(info.labelIsSingleLine);
     }
@@ -347,7 +357,9 @@ public class ContactGridManager {
       forwardedNumberView.setVisibility(View.GONE);
     }
 
-    if (info.isTimerVisible) {
+    /// M: Show connect time only when primaryCallState.connectTimeMillis > 0 @{
+    if (info.isTimerVisible && primaryCallState.connectTimeMillis > 0) {
+    /// @}
       bottomTextSwitcher.setDisplayedChild(1);
       bottomTimerView.setBase(
           primaryCallState.connectTimeMillis
@@ -359,12 +371,25 @@ public class ContactGridManager {
             "starting timer with base: %d",
             bottomTimerView.getBase());
         bottomTimerView.start();
-        isTimerStarted = true;
+
+        /// M: ALPS03536309, need to refresh time when CDMA accept @ {
+        /**
+          * Google code:
+          isTimerStarted = true;
+          */
+        /// @}
       }
     } else {
       bottomTextSwitcher.setDisplayedChild(0);
       bottomTimerView.stop();
       isTimerStarted = false;
     }
+  }
+
+  /**
+   * M: add for auto decline timer for video upgrade request.
+   */
+  public void updateDeclineTimer() {
+    updateTopRow();
   }
 }

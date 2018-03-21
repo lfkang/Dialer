@@ -45,6 +45,7 @@ public class VisualVoicemailEnabledChecker implements CallLogQueryHandler.Listen
   private SharedPreferences mPrefs;
   private boolean mHasActiveVoicemailProvider;
   private CallLogQueryHandler mCallLogQueryHandler;
+  private VoicemailStatusHelper mVoicemailStatusHelper;
   private Context mContext;
   private Callback mCallback;
 
@@ -52,6 +53,7 @@ public class VisualVoicemailEnabledChecker implements CallLogQueryHandler.Listen
     mContext = context;
     mCallback = callback;
     mPrefs = PreferenceManager.getDefaultSharedPreferences(mContext);
+    mVoicemailStatusHelper = new VoicemailStatusHelper();
     mHasActiveVoicemailProvider = mPrefs.getBoolean(PREF_KEY_HAS_ACTIVE_VOICEMAIL_PROVIDER, false);
   }
 
@@ -75,7 +77,7 @@ public class VisualVoicemailEnabledChecker implements CallLogQueryHandler.Listen
   @Override
   public void onVoicemailStatusFetched(Cursor statusCursor) {
     boolean hasActiveVoicemailProvider =
-        VoicemailStatusHelper.getNumberActivityVoicemailSources(statusCursor) > 0;
+        mVoicemailStatusHelper.getNumberActivityVoicemailSources(statusCursor) > 0;
     if (hasActiveVoicemailProvider != mHasActiveVoicemailProvider) {
       mHasActiveVoicemailProvider = hasActiveVoicemailProvider;
       mPrefs
@@ -109,4 +111,11 @@ public class VisualVoicemailEnabledChecker implements CallLogQueryHandler.Listen
     /** Callback to notify enabled status has changed to the @param newValue */
     void onVisualVoicemailEnabledStatusChanged(boolean newValue);
   }
+
+  /// M: [Multi-Delete] For CallLog delete @{
+  @Override
+  public void onCallsDeleted() {
+    // Do nothing
+  }
+  /// @}
 }

@@ -29,6 +29,9 @@ import android.util.DisplayMetrics;
 import android.util.SparseIntArray;
 import android.util.TypedValue;
 import android.widget.TextView;
+
+import com.android.dialer.common.LogUtil;
+
 import javax.annotation.Nullable;
 
 /**
@@ -200,7 +203,9 @@ public class AutoResizeTextView extends TextView {
   private void adjustTextSize() {
     int maxWidth = getMeasuredWidth() - getPaddingLeft() - getPaddingRight();
     int maxHeight = getMeasuredHeight() - getPaddingBottom() - getPaddingTop();
-
+    LogUtil.d("AutoResizeTextView.adjustTextSize",
+            "%d : %d, %f",
+            maxWidth, maxHeight, maxTextSize);
     if (maxWidth <= 0 || maxHeight <= 0) {
       return;
     }
@@ -213,6 +218,10 @@ public class AutoResizeTextView extends TextView {
     float textSize = computeTextSize(
         minSizeInStepSizeUnits, maxSizeInStepSizeUnits, availableSpaceRect);
     super.setTextSize(resizeStepUnit, textSize);
+    /// M: ALPS03651795, Contact Name display incomplete @{
+    requestLayout();
+    invalidate();
+    /// @}
   }
 
   private boolean suggestedSizeFitsInSpace(float suggestedSizeInPx, RectF availableSpace) {

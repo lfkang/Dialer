@@ -34,11 +34,15 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 import android.support.annotation.NonNull;
+import android.content.pm.PackageManager.NameNotFoundException;
+import android.content.pm.PermissionInfo;
 import android.support.v4.content.ContextCompat;
 import android.support.v4.content.LocalBroadcastManager;
 import android.widget.Toast;
+
 import com.android.dialer.common.LogUtil;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -51,6 +55,8 @@ public class PermissionsUtil {
   private static final String PREFERENCE_CAMERA_ALLOWED_BY_USER = "camera_allowed_by_user";
   private static final String PERMISSION_PREFERENCE = "dialer_permissions";
   private static final String CEQUINT_PERMISSION = "com.cequint.ecid.CALLER_ID_LOOKUP";
+  ///M: Add for multi-party conference call permission
+  private static final String CTA_CONFERENCE_CALL = "com.mediatek.permission.CTA_CONFERENCE_CALL";
 
   // Permissions list retrieved from application manifest.
   // Starting in Android O Permissions must be explicitly enumerated:
@@ -65,24 +71,28 @@ public class PermissionsUtil {
               CALL_PHONE,
               ADD_VOICEMAIL,
               WRITE_VOICEMAIL,
-              READ_VOICEMAIL));
+              READ_VOICEMAIL,
+              /**M:*/permission.PROCESS_OUTGOING_CALLS,
+              ///M: Add for multi-party conference call permission
+              CTA_CONFERENCE_CALL));
 
   public static final List<String> allContactsGroupPermissionsUsedInDialer =
-      Collections.unmodifiableList(Arrays.asList(READ_CONTACTS, WRITE_CONTACTS));
+      Collections.unmodifiableList(Arrays.asList(READ_CONTACTS, WRITE_CONTACTS,
+        /**M:*/permission.GET_ACCOUNTS));
 
   public static final List<String> allLocationGroupPermissionsUsedInDialer =
       Collections.unmodifiableList(Arrays.asList(ACCESS_FINE_LOCATION, ACCESS_COARSE_LOCATION));
 
   public static boolean hasPhonePermissions(Context context) {
-    return hasPermission(context, permission.CALL_PHONE);
+    return hasPermission(context,/* M:checking full group */PHONE_FULL_GROUP);
   }
 
   public static boolean hasContactsReadPermissions(Context context) {
-    return hasPermission(context, permission.READ_CONTACTS);
+    return hasPermission(context,/* M:checking full group */CONTACTS_FULL_GROUP);
   }
 
   public static boolean hasLocationPermissions(Context context) {
-    return hasPermission(context, permission.ACCESS_FINE_LOCATION);
+    return hasPermission(context,/* M:checking full group */LOCATION_FULL_GROUP);
   }
 
   public static boolean hasCameraPermissions(Context context) {
@@ -210,6 +220,126 @@ public class PermissionsUtil {
     return permissionsCurrentlyDenied.toArray(new String[permissionsCurrentlyDenied.size()]);
   }
 
+  /// M: Mediatek start.
+  /// M: MTK modified the AOSP permission group logic.
+  /// Now, add permissions full list for real permission group checking
+  /// instead of AOSP. This is more logically, and meet the requirement of CTA. @{
+  /**
+   * The Phone group permissions defined by AOSP.
+   */
+  public static final String[] PHONE_FULL_GROUP = new String[] {
+    permission.CALL_PHONE, permission.READ_PHONE_STATE,
+    permission.READ_CALL_LOG, permission.WRITE_CALL_LOG,
+    permission.ADD_VOICEMAIL,
+    permission.PROCESS_OUTGOING_CALLS,
+    ///M: Add for multi-party conference call permission
+    CTA_CONFERENCE_CALL
+  };
+  /**
+   * The CONTACTS group permissions defined by AOSP.
+   */
+  public static final String[] CONTACTS_FULL_GROUP = new String[] {
+    permission.READ_CONTACTS, permission.WRITE_CONTACTS,
+    permission.GET_ACCOUNTS
+  };
+  /**
+   * The LOCATION group permissions defined by AOSP.
+   */
+  public static final String[] LOCATION_FULL_GROUP = new String[] {
+    permission.ACCESS_FINE_LOCATION, permission.ACCESS_COARSE_LOCATION
+  };
+
+  /**
+   * M: Retrieve all the permissions in the phone group defined by system
+   * @param context
+   * @param groupName
+   * @return permissions array or null
+   */
+  public static String[] getAllPermissionsByGroup(Context context, String groupName) {
+    final List<PermissionInfo> permissions;
+    try {
+      permissions = context.getPackageManager().queryPermissionsByGroup(groupName,
+          PackageManager.GET_META_DATA);
+    } catch (NameNotFoundException e) {
+      return null;
+    }
+
+    if (permissions == null || permissions.size() == 0) {
+      return null;
+    }
+
+    final ArrayList<String> permissionNames = new ArrayList<String>();
+    for (PermissionInfo permission : permissions) {
+      permissionNames.add(permission.name);
+    }
+    return permissionNames.toArray(new String[permissionNames.size()]);
+  }
+
+  public static boolean hasPermission(Context context, String[] permissions) {
+    boolean result = false;
+    if (permissions == null || permissions.length == 0) {
+      return false;
+    }
+
+    // Collecting package requested permissions in AndroidManifest.
+    PackageInfo packageInfo = null;
+    boolean supportGetInfo = true;
+    try {
+      packageInfo = context.getPackageManager().getPackageInfo(
+          context.getApplicationInfo().packageName, PackageManager.GET_PERMISSIONS);
+    } catch (NameNotFoundException e) {
+      return false;
+    } catch (UnsupportedOperationException e) {
+      // some mock context such as testcase can't support this.
+      supportGetInfo = false;
+      LogUtil.d(PermissionsUtil.class.getSimpleName(), "NOT SUPPORTED : " + e.toString());
+    }
+
+    if (supportGetInfo) {
+      if (packageInfo == null || packageInfo.requestedPermissions == null) {
+        return false;
+      }
+      List<String> requestedPermissions = Arrays.asList(packageInfo.requestedPermissions);
+      for (String permission : permissions) {
+        // Only the permissions were requested need to be checking granted or not.
+        if (requestedPermissions.contains(permission) &&
+                ContextCompat.checkSelfPermission(context, permission)
+                != PackageManager.PERMISSION_GRANTED) {
+          LogUtil.d(PermissionsUtil.class.getSimpleName(), "NOT GRANTED : " + permission);
+          return false;
+        }
+      }
+    } else {
+       for (String permission : permissions) {
+        if (ContextCompat.checkSelfPermission(context, permission)
+                != PackageManager.PERMISSION_GRANTED) {
+          LogUtil.d(PermissionsUtil.class.getSimpleName(), "NOT GRANTED : " + permission);
+          return false;
+        }
+      }
+    }
+    return true;
+  }
+
+  public static void registerPermissionReceiver(Context context, BroadcastReceiver receiver,
+      String[] permissions) {
+    IntentFilter filter = null;
+    for (String permission : permissions) {
+      filter = new IntentFilter(permission);
+      LocalBroadcastManager.getInstance(context).registerReceiver(receiver, filter);
+    }
+  }
+
+  public static void notifyPermissionGranted(Context context, String[] permissions) {
+    Intent intent = null;
+    for (String permission : permissions) {
+      intent = new Intent(permission);
+      LocalBroadcastManager.getInstance(context).sendBroadcast(intent);
+    }
+  }
+  /// @}
+  /// M: Mediatek end.
+
   /**
    * Since we are granted the camera permission automatically as a first-party app, we need to show
    * a toast to let users know the permission was granted for privacy reasons.
@@ -233,4 +363,5 @@ public class PermissionsUtil {
         .putBoolean(PREFERENCE_CAMERA_ALLOWED_BY_USER, true)
         .apply();
   }
+
 }

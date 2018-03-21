@@ -258,6 +258,8 @@ public class ContactInfoCache {
       return;
     }
 
+    ///M: add log for tracking thread created.
+    LogUtil.i("ContactInfoCache.startRequestProcessing", "new QueryThread in : " + this);
     mContactInfoQueryThread = new QueryThread();
     mContactInfoQueryThread.setPriority(Thread.MIN_PRIORITY);
     mContactInfoQueryThread.start();
@@ -292,7 +294,8 @@ public class ContactInfoCache {
    * up the contact information (if it has not been already started). Otherwise, it will be started
    * with a delay. See {@link #START_PROCESSING_REQUESTS_DELAY_MS}.
    */
-  private void enqueueRequest(
+  @VisibleForTesting
+  /*private*/protected void enqueueRequest(
       String number,
       String countryIso,
       ContactInfo callLogInfo,
@@ -316,9 +319,12 @@ public class ContactInfoCache {
         && TextUtils.equals(callLogInfo.label, info.label);
   }
 
-  /** Sets whether processing of requests for contact details should be enabled. */
-  public void disableRequestProcessing() {
-    mRequestProcessingDisabled = true;
+  /**
+   * Sets whether processing of requests for contact details should be enabled.
+   * @param disable M: add to reset it
+   */
+  public void disableRequestProcessing(boolean disable) {
+    mRequestProcessingDisabled = disable;
   }
 
   @VisibleForTesting
@@ -358,13 +364,21 @@ public class ContactInfoCache {
 
         try {
           ContactInfoRequest request = mUpdateRequests.take();
+          ///M:add log
+          LogUtil.d("ContactInfoCache.QueryThread", " cache run : "
+              + (request == null ? "empty" : request.number));
           shouldRedraw |= queryContactInfo(request);
+          ///M: modify for multi-thread concurrent issue. Thread 1: mUpdateRequests.take() ->
+          /// mUpdateRequests.isEmpty(): false -> Thread 2: mUpdateRequest.take(): queue empty ->
+          /// Thread1: mUpdateRequest.peek() is NULL. @{
+          ContactInfoRequest requestNext = mUpdateRequests.peek();
           if (shouldRedraw
-              && (mUpdateRequests.isEmpty()
-                  || (request.isLocalRequest() && !mUpdateRequests.peek().isLocalRequest()))) {
+              && (requestNext == null
+                  || (request.isLocalRequest() && !requestNext.isLocalRequest()))) {
             shouldRedraw = false;
             mHandler.sendEmptyMessage(REDRAW);
           }
+          /// M: @}
         } catch (InterruptedException e) {
           // Ignore and attempt to continue processing requests
         }

@@ -92,20 +92,26 @@ public class VideoSurfaceTextureImpl implements VideoSurfaceTexture {
     if (this.textureView == textureView) {
       return;
     }
-    LogUtil.i("VideoSurfaceTextureImpl.attachToTextureView", toString());
-
-    if (this.textureView != null) {
+    LogUtil.i("VideoSurfaceTextureImpl.attachToTextureView", "textureview " +
+            textureView + " " + toString());
+    /// M:ALPS03519010 fix surfaceTexture destory by clear listner when exist active call and answer
+    ///MT call.@{
+   /* if (this.textureView != null) {
       this.textureView.setOnClickListener(null);
       this.textureView.setSurfaceTextureListener(null);
-    }
-
+    }*/
+    ///@}
     this.textureView = textureView;
     textureView.setSurfaceTextureListener(new SurfaceTextureListener());
     textureView.setOnClickListener(new OnClickListener());
 
     boolean areSameSurfaces = Objects.equals(savedSurfaceTexture, textureView.getSurfaceTexture());
-    LogUtil.i("VideoSurfaceTextureImpl.attachToTextureView", "areSameSurfaces: " + areSameSurfaces);
-    if (savedSurfaceTexture != null && !areSameSurfaces) {
+    ///M: check savedSurfaceTexture release status before use.
+    LogUtil.i("VideoSurfaceTextureImpl.attachToTextureView", "areSameSurfaces: " + areSameSurfaces
+            + "savedSurfaceTexture released: "
+            + (savedSurfaceTexture == null ? "null" : savedSurfaceTexture.isReleased())
+            + "isDone: " + isDoneWithSurface);
+    if (savedSurfaceTexture != null && !areSameSurfaces && !savedSurfaceTexture.isReleased()) {
       textureView.setSurfaceTexture(savedSurfaceTexture);
       if (surfaceDimensions != null && createSurface(surfaceDimensions.x, surfaceDimensions.y)) {
         onSurfaceCreated();
@@ -181,13 +187,18 @@ public class VideoSurfaceTextureImpl implements VideoSurfaceTexture {
           "newSurfaceTexture: "
               + newSurfaceTexture
               + " "
-              + VideoSurfaceTextureImpl.this.toString());
+              + VideoSurfaceTextureImpl.this.toString()
+              + "savedSurfaceTexture released: "
+              + (savedSurfaceTexture == null ? "null" : savedSurfaceTexture.isReleased()));
 
       // Where there is no saved {@link SurfaceTexture} available, use the newly created one.
       // If a saved {@link SurfaceTexture} is available, we are re-creating after an
       // orientation change.
       boolean surfaceCreated;
-      if (savedSurfaceTexture == null) {
+      if (savedSurfaceTexture == null
+        /// M: ALPS03515693 Fix surfacetexture released by view @{
+        || savedSurfaceTexture.isReleased()) {
+        /// @}
         savedSurfaceTexture = newSurfaceTexture;
         surfaceCreated = createSurface(width, height);
       } else {
@@ -211,7 +222,9 @@ public class VideoSurfaceTextureImpl implements VideoSurfaceTexture {
           "destroyedSurfaceTexture: "
               + destroyedSurfaceTexture
               + " "
-              + VideoSurfaceTextureImpl.this.toString());
+              + VideoSurfaceTextureImpl.this.toString()
+              +"isDone: "
+              + isDoneWithSurface);
       if (delegate != null) {
         delegate.onSurfaceDestroyed(VideoSurfaceTextureImpl.this);
       } else {

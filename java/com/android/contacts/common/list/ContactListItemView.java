@@ -1026,6 +1026,9 @@ public class ContactListItemView extends ViewGroup implements SelectionBoundsAdj
       }
       mLabelView.setActivated(isActivated());
       mLabelView.setId(R.id.cliv_label_textview);
+      ///M: [ALPS03328208] @{
+      mLabelView.setTextAlignment(View.TEXT_ALIGNMENT_VIEW_START);
+      ///@}
       addView(mLabelView);
     }
     return mLabelView;

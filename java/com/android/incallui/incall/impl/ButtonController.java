@@ -105,7 +105,8 @@ interface ButtonController {
     public void setAllowed(boolean isAllowed) {
       this.isAllowed = isAllowed;
       if (button != null) {
-        button.setVisibility(isAllowed ? View.VISIBLE : View.INVISIBLE);
+        /// M: set to GONE
+        button.setVisibility(isAllowed ? View.VISIBLE : View.GONE);
       }
     }
 
@@ -131,7 +132,8 @@ interface ButtonController {
       this.button = button;
       if (button != null) {
         button.setEnabled(isEnabled);
-        button.setVisibility(isAllowed ? View.VISIBLE : View.INVISIBLE);
+        /// M: set to GONE
+        button.setVisibility(isAllowed ? View.VISIBLE : View.GONE);
         button.setChecked(isChecked);
         button.setOnClickListener(null);
         button.setOnCheckedChangeListener(this);
@@ -223,7 +225,8 @@ interface ButtonController {
     public void setAllowed(boolean isAllowed) {
       this.isAllowed = isAllowed;
       if (button != null) {
-        button.setVisibility(isAllowed ? View.VISIBLE : View.INVISIBLE);
+        /// M: set to GONE
+        button.setVisibility(isAllowed ? View.VISIBLE : View.GONE);
       }
     }
 
@@ -246,7 +249,8 @@ interface ButtonController {
       this.button = button;
       if (button != null) {
         button.setEnabled(isEnabled);
-        button.setVisibility(isAllowed ? View.VISIBLE : View.INVISIBLE);
+        /// M: set to GONE
+        button.setVisibility(isAllowed ? View.VISIBLE : View.GONE);
         button.setChecked(false);
         button.setOnCheckedChangeListener(null);
         button.setOnClickListener(this);
@@ -558,6 +562,141 @@ interface ButtonController {
     @Override
     public void onClick(View view) {
       inCallScreenDelegate.onSecondaryInfoClicked();
+    }
+  }
+
+  /**
+   * M: [Voice Record]
+   * Switch voice record button controller
+   *
+   */
+  class SwitchVoiceRecordButtonController extends SimpleCheckableButtonController {
+
+      public SwitchVoiceRecordButtonController(InCallButtonUiDelegate delegate) {
+        super(
+            delegate,
+            InCallButtonIds.BUTTON_SWITCH_VOICE_RECORD,
+            R.string.stop_record,
+            R.string.start_record,
+            R.string.start_record,
+            R.drawable.mtk_ic_toolbar_start_voice_record);
+      }
+
+      @Override
+      public void doCheckedChanged(boolean isChecked) {
+        delegate.toggleVoiceRecord(isChecked);
+      }
+  }
+
+  /**
+   * M: [Hang Up]
+   * Hang up all calls button controller
+   *
+   */
+  class HangupAllButtonController extends SimpleNonCheckableButtonController {
+      private final InCallScreenDelegate mInCallScreenDelegate;
+      public HangupAllButtonController(@NonNull InCallScreenDelegate delegate) {
+          super(null,
+                  InCallButtonIds.BUTTON_HANG_UP_ALL,
+                  R.string.onscreenHangupAll,
+                  R.string.onscreenHangupAll,
+                  R.drawable.mtk_ic_toolbar_hangup_all);
+          Assert.isNotNull(delegate);
+          mInCallScreenDelegate = delegate;
+      }
+
+      @Override
+      public void onClick(View v) {
+          mInCallScreenDelegate.onHangupAllClicked();
+      }
+  }
+
+  /**
+   * M: [Hang Up]
+   * Hang up hold calls button controller
+   *
+   */
+  class HangupHoldButtonController extends SimpleNonCheckableButtonController {
+      private final InCallScreenDelegate mInCallScreenDelegate;
+      public HangupHoldButtonController(@NonNull InCallScreenDelegate delegate) {
+          super(null,
+                  InCallButtonIds.BUTTON_HANG_UP_HOLD,
+                  R.string.onscreenHangupHolding,
+                  R.string.onscreenHangupHolding,
+                  R.drawable.mtk_ic_toolbar_hangup_all_holding);
+          Assert.isNotNull(delegate);
+          mInCallScreenDelegate = delegate;
+      }
+
+      @Override
+      public void onClick(View v) {
+          mInCallScreenDelegate.onHangupHoldClicked();
+      }
+  }
+
+  /**
+   * M: [ECT(blind)]
+   * Blind ect button controller
+   *
+   */
+  class BlindECTButtonController extends SimpleNonCheckableButtonController {
+
+      public BlindECTButtonController(InCallButtonUiDelegate delegate) {
+        super(
+            delegate,
+            InCallButtonIds.BUTTON_BLIND_ECT,
+            R.string.menu_ect,
+            R.string.menu_ect,
+            R.drawable.mtk_ic_toolbar_transfer);
+      }
+
+    @Override
+    public void onClick(View v) {
+        delegate.onBlindOrAssuredEctClicked();
+    }
+  }
+
+  /**
+   * M: [ECT(blind)]
+   * ect button controller
+   *
+   */
+  class ECTButtonController extends SimpleNonCheckableButtonController {
+
+    public ECTButtonController(InCallButtonUiDelegate delegate) {
+        super(
+              delegate,
+              InCallButtonIds.BUTTON_ECT,
+              R.string.menu_ect,
+              R.string.menu_ect,
+              R.drawable.mtk_ic_toolbar_transfer);
+    }
+
+    @Override
+    public void onClick(View v) {
+        delegate.onConsultativeEctClicked();
+    }
+  }
+
+  /**
+   * M: [Device Switch]
+   * Device switch button controller
+   *
+   */
+  class DeviceSwitchButtonController extends SimpleNonCheckableButtonController {
+
+    public DeviceSwitchButtonController(InCallButtonUiDelegate delegate) {
+        super(
+              delegate,
+              InCallButtonIds.BUTTON_DEVICE_SWITCH,
+              R.string.menu_device_switch,
+              R.string.menu_device_switch,
+              R.drawable.mtk_ic_toolbar_device_switch);
+    }
+
+    @Override
+    public void onClick(View v) {
+        delegate.onDeviceSwitchClicked();
     }
   }
 }

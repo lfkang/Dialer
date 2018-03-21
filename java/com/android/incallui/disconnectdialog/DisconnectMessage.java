@@ -53,6 +53,12 @@ public class DisconnectMessage {
     toastMessage = null;
   }
 
+  //M: WFC @{
+  public DisconnectCause getDisconnectCause(){
+      return cause;
+  }
+  // @}
+
   @Override
   public String toString() {
     return String.format(

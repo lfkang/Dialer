@@ -16,10 +16,12 @@
 
 package com.android.incallui;
 
+import android.content.Context;
 import android.os.Bundle;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
+import android.widget.ImageButton;
 import android.widget.ListView;
 import com.android.contacts.common.ContactPhotoManager;
 import com.android.dialer.logging.Logger;
@@ -64,7 +66,9 @@ public class ConferenceManagerFragment
 
     mConferenceParticipantList = (ListView) parent.findViewById(R.id.participantList);
     mContactPhotoManager = ContactPhotoManager.getInstance(getActivity().getApplicationContext());
-
+    /// M: for volte @{
+    initAddMemberButton(parent);
+    /// @}
     return parent;
   }
 
@@ -103,4 +107,37 @@ public class ConferenceManagerFragment
   public void refreshCall(DialerCall call) {
     mConferenceParticipantListAdapter.refreshCall(call);
   }
+
+  /// ----------------------------------------Mediatek--------------------------------------
+  /// M: for volte. add member part. @{
+  private View mFloatingAddMemberButtonContainer;
+  private ImageButton mFloatingAddMemberButton;
+
+  /**
+   * M: init add member button.
+   * @param view
+   */
+  private void initAddMemberButton(View view) {
+      mFloatingAddMemberButtonContainer = view.findViewById(
+              R.id.floating_add_member_action_button_container);
+      mFloatingAddMemberButton = (ImageButton) view
+              .findViewById(R.id.floating_add_member_action_button);
+      mFloatingAddMemberButton.setOnClickListener(new View.OnClickListener() {
+          @Override
+          public void onClick(View v) {
+              Log.d(this, "onVolteAddConfMemberClicked()...");
+              getPresenter().showAddMemberScreen();
+          }
+      });
+      mFloatingAddMemberButtonContainer.setVisibility(View.GONE);
+  }
+
+  /**
+   * M: show add member button if necessary.
+   */
+  @Override
+  public void showAddMemberButton(boolean visible) {
+      mFloatingAddMemberButtonContainer.setVisibility(visible ? View.VISIBLE : View.GONE);
+  }
+  /// @}
 }

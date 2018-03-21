@@ -119,6 +119,7 @@ public final class DialerUiTaskFragment<InputT, OutputT> extends Fragment {
   }
 
   void executeSerial(InputT input) {
+    LogUtil.d("DialerUiTaskFragment.executeSerial", "AsyncTaskExecutor.submit.");
     serialExecutor.execute(() -> runTask(input));
   }
 
@@ -129,13 +130,16 @@ public final class DialerUiTaskFragment<InputT, OutputT> extends Fragment {
     }
     scheduledFuture =
         serialExecutor.schedule(() -> runTask(input), waitMillis, TimeUnit.MILLISECONDS);
+    LogUtil.d("DialerUiTaskFragment.executeSerialWithWait", "AsyncTaskExecutor.submit.");
   }
 
   void executeParallel(InputT input) {
+    LogUtil.d("DialerUiTaskFragment.executeParallel", "AsyncTaskExecutor.submit.");
     parallelExecutor.execute(() -> runTask(input));
   }
 
   void executeOnCustomExecutor(ExecutorService executor, InputT input) {
+    LogUtil.d("DialerUiTaskFragment.executeOnCustomExecutor", "AsyncTaskExecutor.submit.");
     executor.execute(() -> runTask(input));
   }
 

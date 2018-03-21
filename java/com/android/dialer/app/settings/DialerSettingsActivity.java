@@ -41,6 +41,8 @@ import com.android.voicemail.VoicemailClient;
 import com.android.voicemail.VoicemailComponent;
 import java.util.List;
 
+import com.mediatek.dialer.ext.ExtensionManager;
+
 /** Activity for dialer settings. */
 @SuppressWarnings("FragmentInjection") // Activity not exported
 @UsedByReflection(value = "AndroidManifest-app.xml")
@@ -114,7 +116,11 @@ public class DialerSettingsActivity extends AppCompatPreferenceActivity {
       phoneAccountSettingsHeader.intent = phoneAccountSettingsIntent;
       target.add(phoneAccountSettingsHeader);
     }
-    if (FilteredNumberCompat.canCurrentUserOpenBlockSettings(this)) {
+    if (FilteredNumberCompat.canCurrentUserOpenBlockSettings(this) &&
+        /// M: For OP01, do not use BlockedNumberProvider @{
+        ExtensionManager.getDialerUtilsExtension().shouldUseBlockedNumberFeature()) {
+        /// @}
+
       Header blockedCallsHeader = new Header();
       blockedCallsHeader.titleRes = R.string.manage_blocked_numbers_label;
       blockedCallsHeader.intent = FilteredNumberCompat.createManageBlockedNumbersIntent(this);

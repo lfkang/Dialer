@@ -39,4 +39,12 @@ public interface VideoCallScreen {
   Fragment getVideoCallScreenFragment();
 
   String getCallId();
+
+  /// M: MediaTek features. @{
+  void hidePreview(boolean hide);
+  void updateVideoDebugInfo(long dataUsage);
+  // Support show dialpad for video call
+  int getDialpadContainerResourceId();
+  void onVideoCallScreenDialpadVisibilityChange(boolean isShowing);
+  /// @}
 }

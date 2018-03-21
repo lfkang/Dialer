@@ -18,6 +18,7 @@ package com.android.dialer.calldetails;
 
 import android.content.Context;
 import android.content.Intent;
+import android.database.Cursor;
 import android.os.AsyncTask;
 import android.os.Bundle;
 import android.provider.CallLog;
@@ -29,20 +30,46 @@ import android.support.v7.widget.RecyclerView;
 import android.support.v7.widget.Toolbar;
 import android.support.v7.widget.Toolbar.OnMenuItemClickListener;
 import android.view.MenuItem;
+import android.view.Menu;
+import android.view.View;
+import android.widget.Toast;
+import com.android.dialer.app.contactinfo.ContactInfoCache;
+import com.android.dialer.app.contactinfo.ExpirableCacheHeadlessFragment;
+import com.android.dialer.app.contactinfo.ContactInfoCache.OnContactInfoChangedListener;
 import com.android.dialer.calldetails.CallDetailsEntries.CallDetailsEntry;
+import com.android.dialer.calllogutils.PhoneCallDetails;
 import com.android.dialer.common.Assert;
 import com.android.dialer.common.concurrent.AsyncTaskExecutors;
 import com.android.dialer.dialercontact.DialerContact;
+import com.android.dialer.common.LogUtil;
+import com.android.dialer.location.GeoUtil;
 import com.android.dialer.logging.DialerImpression;
 import com.android.dialer.logging.Logger;
 import com.android.dialer.logging.UiAction;
 import com.android.dialer.performancereport.PerformanceReport;
 import com.android.dialer.postcall.PostCall;
 import com.android.dialer.protos.ProtoParsers;
+import com.android.dialer.phonenumbercache.CallLogQuery;
+import com.android.dialer.phonenumbercache.ContactInfoHelper;
+import com.android.dialer.util.PermissionsUtil;
+import com.mediatek.dialer.activities.NeedTestActivity;
+import com.mediatek.dialer.calllog.ConfCallLogAsyncTaskUtil;
+import com.mediatek.dialer.calllog.ConfCallLogAsyncTaskUtil.ConfCallLogAsyncTaskListener;
+import com.mediatek.dialer.calllog.ConfCallMemberListAdapter;
+import com.mediatek.dialer.ext.ExtensionManager;
+import com.mediatek.dialer.util.DialerFeatureOptions;
+
 import java.util.List;
 
-/** Displays the details of a specific call log entry. */
-public class CallDetailsActivity extends AppCompatActivity
+//TINNO BEGIN
+// FEATURE_SMART_GESTURE chenqi.zhao 20180105
+import com.tinno.feature.FeatureMBA;
+//TINNO END
+
+/** Displays the details of a specific call log entry.
+ * M: change extend to NeedTestActivity for test case developing
+ */
+public class CallDetailsActivity extends NeedTestActivity
     implements OnMenuItemClickListener, CallDetailsFooterViewHolder.ReportCallIdListener {
 
   public static final String EXTRA_PHONE_NUMBER = "phone_number";
@@ -52,9 +79,17 @@ public class CallDetailsActivity extends AppCompatActivity
   private static final String EXTRA_CAN_REPORT_CALLER_ID = "can_report_caller_id";
   private static final String TASK_DELETE = "task_delete";
 
+  //TINNO BEGIN
+  //FEATURE_SMARTGESTURE <体感拨号> chenqi.zhao 20180105
+  private static String mNumber;
+  //TINNO END
+
   private List<CallDetailsEntry> entries;
   private DialerContact contact;
-
+  /// M: for Plug-in @{
+  private Toolbar mToolbar;
+  /// @}
+ private static final String[] READ_CALL_LOG = PermissionsUtil.PHONE_FULL_GROUP;
   public static boolean isLaunchIntent(Intent intent) {
     return intent.getComponent() != null
         && CallDetailsActivity.class.getName().equals(intent.getComponent().getClassName());
@@ -68,6 +103,13 @@ public class CallDetailsActivity extends AppCompatActivity
     Assert.isNotNull(details);
     Assert.isNotNull(contact);
 
+    //TINNO BEGIN
+    //FEATURE_SMARTGESTURE <体感拨号> chenqi.zhao 20180105
+    if (FeatureMBA.MBA_FTR_ApeSmartGesture_REQC1194) {
+      mNumber = contact.getNumber();
+    }
+    //TINNO END
+
     Intent intent = new Intent(context, CallDetailsActivity.class);
     ProtoParsers.put(intent, EXTRA_CONTACT, contact);
     ProtoParsers.put(intent, EXTRA_CALL_DETAILS_ENTRIES, details);
@@ -77,23 +119,41 @@ public class CallDetailsActivity extends AppCompatActivity
 
   @Override
   protected void onCreate(Bundle savedInstanceState) {
+    if (!PermissionsUtil.hasPermission(this, READ_CALL_LOG)) {
+      finish();
+    }
+
     super.onCreate(savedInstanceState);
     setContentView(R.layout.call_details_activity);
-    Toolbar toolbar = findViewById(R.id.toolbar);
-    toolbar.inflateMenu(R.menu.call_details_menu);
-    toolbar.setOnMenuItemClickListener(this);
-    toolbar.setTitle(R.string.call_details);
-    toolbar.setNavigationOnClickListener(
+    mToolbar = findViewById(R.id.toolbar);
+    mToolbar.inflateMenu(R.menu.call_details_menu);
+    mToolbar.setOnMenuItemClickListener(this);
+    mToolbar.setTitle(R.string.call_details);
+    mToolbar.setNavigationOnClickListener(
         v -> {
           PerformanceReport.recordClick(UiAction.Type.CLOSE_CALL_DETAIL_WITH_CANCEL_BUTTON);
           finish();
         });
+    /// M: for Plug-in @{
+    ExtensionManager.getCallDetailExtension().onCreate(this, mToolbar);
+    /// @}
     onHandleIntent(getIntent());
   }
 
   @Override
   protected void onResume() {
     super.onResume();
+
+    //TINNO BEGIN
+    //FEATURE_SMARTGESTURE <体感拨号> chenqi.zhao 20180105
+    if (FeatureMBA.MBA_FTR_ApeSmartGesture_REQC1194) {
+      if (mNumber != null && !"".equals(mNumber)) {
+        Intent intent = new Intent("android.intent.action.ACTION_PHONE_DIAL_START");
+        intent.putExtra("dialNumber", mNumber);
+        sendBroadcast(intent);
+      }
+    }
+    //TINNO END
 
     // Some calls may not be recorded (eg. from quick contact),
     // so we should restart recording after these calls. (Recorded call is stopped)
@@ -103,6 +163,13 @@ public class CallDetailsActivity extends AppCompatActivity
     }
 
     PostCall.promptUserForMessageIfNecessary(this, findViewById(R.id.recycler_view));
+    /// M:[VoLTE ConfCallLog] @{
+    if (mIsConferenceCall) {
+      updateConfCallData();
+      mConfCallMemberListAdapter.onResume();
+      return;
+    }
+    ///@}
   }
 
   @Override
@@ -119,8 +186,35 @@ public class CallDetailsActivity extends AppCompatActivity
             .getEntriesList();
 
     RecyclerView recyclerView = findViewById(R.id.recycler_view);
-    recyclerView.setLayoutManager(new LinearLayoutManager(this));
-    recyclerView.setAdapter(new CallDetailsAdapter(this, contact, entries, this));
+
+    /// M: [VoLTE ConfCallLog] For volte conference callLog @{
+    mContext = this;
+    if (DialerFeatureOptions.isVolteConfCallLogSupport()) {
+      mIsConferenceCall = intent.getBooleanExtra(EXTRA_IS_CONFERENCE_CALL, false);
+      mIsConferenceChildDetail = intent.getBooleanExtra(EXTRA_IS_CONFERENCE_CHILD_DETAIL, false);
+    }
+    if (mIsConferenceCall) {
+      LogUtil.d(TAG, "Volte ConfCall mIsConferenceCall= " + mIsConferenceCall);
+      mMemberList = recyclerView;
+      mMemberList.setHasFixedSize(true);
+      mLayoutManager = new LinearLayoutManager(this);
+      mMemberList.setLayoutManager(mLayoutManager);
+      String currentCountryIso = GeoUtil.getCurrentCountryIso(mContext);
+
+      mConfContactInfoCache = new ContactInfoCache(ExpirableCacheHeadlessFragment.attach(
+          (AppCompatActivity) mContext).getRetainedCache(), new ContactInfoHelper(mContext,
+          currentCountryIso), mOnContactInfoChangedListener);
+      mConfCallMemberListAdapter = new ConfCallMemberListAdapter(this, contact,
+          mConfContactInfoCache);
+      mMemberList.setAdapter(mConfCallMemberListAdapter);
+    } else {
+      Toolbar toolbar = (Toolbar) findViewById(R.id.toolbar);
+      Menu menu = toolbar.getMenu();
+      menu.findItem(R.id.call_detail_delete_menu_item).setVisible(!mIsConferenceChildDetail);
+    /// @}
+      recyclerView.setLayoutManager(new LinearLayoutManager(this));
+      recyclerView.setAdapter(new CallDetailsAdapter(this, contact, entries, this));
+    }
     PerformanceReport.logOnScrollStateChange(recyclerView);
   }
 
@@ -128,6 +222,7 @@ public class CallDetailsActivity extends AppCompatActivity
   public boolean onMenuItemClick(MenuItem item) {
     if (item.getItemId() == R.id.call_detail_delete_menu_item) {
       Logger.get(this).logImpression(DialerImpression.Type.USER_DELETED_CALL_LOG_ITEM);
+      LogUtil.d("CallDetailsActivity.onMenuItemClick", "AsyncTaskExecutor.submit.");
       AsyncTaskExecutors.createAsyncTaskExecutor().submit(TASK_DELETE, new DeleteCallsTask());
       item.setEnabled(false);
       return true;
@@ -188,4 +283,130 @@ public class CallDetailsActivity extends AppCompatActivity
       finish();
     }
   }
+
+  /// M: [VoLTE ConfCallLog] For volte conference callLog @{
+  public static final String EXTRA_IS_CONFERENCE_CALL = "EXTRA_IS_CONFERENCE_CALL";
+  public static final String EXTRA_IS_CONFERENCE_CHILD_DETAIL = "EXTRA_IS_CONFERENCE_CHILD_DETAIL";
+  protected static final String TAG = "CallDetailsActivity";
+  private boolean mIsConferenceCall = false;
+  // Is it conference child call log detail
+  private boolean mIsConferenceChildDetail = false;
+  private LinearLayoutManager mLayoutManager;
+  private ContactInfoCache mConfContactInfoCache;
+  private Context mContext;
+
+  ConfCallMemberListAdapter mConfCallMemberListAdapter;
+  RecyclerView mMemberList;
+  /**
+   *  M: [VoLTE ConfCallLog]
+   */
+  public static Intent newInstance(
+      Context context,
+      @NonNull CallDetailsEntries details,
+      @NonNull DialerContact contact,
+      boolean canReportCallerId,
+      final boolean isConferenceCall, final boolean isConfChildDetail) {
+    Assert.isNotNull(details);
+    Assert.isNotNull(contact);
+
+    Intent intent = new Intent(context, CallDetailsActivity.class);
+    ProtoParsers.put(intent, EXTRA_CONTACT, contact);
+    ProtoParsers.put(intent, EXTRA_CALL_DETAILS_ENTRIES, details);
+    intent.putExtra(EXTRA_CAN_REPORT_CALLER_ID, canReportCallerId);
+    intent.putExtra(EXTRA_IS_CONFERENCE_CALL, isConferenceCall);
+    intent.putExtra(EXTRA_IS_CONFERENCE_CHILD_DETAIL, isConfChildDetail);
+    return intent;
+  }
+
+  //copy from CallLogFragment. @{
+  private final OnContactInfoChangedListener mOnContactInfoChangedListener =
+      new OnContactInfoChangedListener() {
+    @Override
+    public void onContactInfoChanged() {
+      if (mConfCallMemberListAdapter != null) {
+        mConfCallMemberListAdapter.notifyDataSetChanged();
+      }
+    }
+  };
+  //@}
+
+  private void updateConfCallData() {
+    mConfContactInfoCache.invalidate();
+    mConfCallMemberListAdapter.setLoading(true);
+    // final long[] ids = getIntent().getLongArrayExtra(EXTRA_CALL_LOG_IDS);
+    ConfCallLogAsyncTaskUtil.getConferenceCallDetails(mContext, entries,
+        mConfCallLogAsyncTaskListener);
+  }
+
+  private ConfCallLogAsyncTaskListener mConfCallLogAsyncTaskListener =
+      new ConfCallLogAsyncTaskListener() {
+
+    @Override
+    public void onGetConfCallDetails(Cursor cursor, PhoneCallDetails[] details) {
+      if (cursor == null || !cursor.moveToFirst()) {
+        LogUtil.d(TAG, "onGetConfCallDetails cursor is empty");
+        Toast.makeText(mContext, R.string.toast_call_detail_error, Toast.LENGTH_SHORT).show();
+        finish();
+        return;
+      }
+
+      LogUtil.d(TAG, "onGetConfCallDetails cursor.getCount()=" + cursor.getCount());
+
+      invalidateOptionsMenu();
+
+      mConfCallMemberListAdapter.setLoading(false);
+      mConfCallMemberListAdapter.setConferenceCallDetails(details);
+      mConfCallMemberListAdapter.invalidatePositions();
+      mConfCallMemberListAdapter.changeCursor(cursor);
+    }
+  };
+
+  @Override
+  public void onPause() {
+    if (mConfCallMemberListAdapter != null) {
+      mConfCallMemberListAdapter.onPause();
+    }
+
+    //TINNO BEGIN
+    //FEATURE_SMARTGESTURE <体感拨号> chenqi.zhao 20180105
+    if (FeatureMBA.MBA_FTR_ApeSmartGesture_REQC1194) {
+      if (mNumber != null && !"".equals(mNumber)) {
+        Intent intent = new Intent("android.intent.action.ACTION_PHONE_DIAL_END");
+        sendBroadcast(intent);
+      }
+    }
+    //TINNO END
+
+    super.onPause();
+  }
+
+  @Override
+  public void onDestroy() {
+    if (mConfCallMemberListAdapter != null) {
+      mConfCallMemberListAdapter.changeCursor(null);
+    }
+    super.onDestroy();
+  }
+
+  /// M: for Plug-in @{
+  @Override
+  public boolean onPrepareOptionsMenu(Menu menu) {
+    LogUtil.d(TAG, "onPrepareOptionsMenu");
+    ExtensionManager.getCallDetailExtension().onPrepareOptionsMenu(this, menu,
+            contact.getNameOrNumber(), contact.getNumber());
+    return super.onPrepareOptionsMenu(menu);
+  }
+
+  public void setActionBar() {
+    if (mToolbar != null) {
+      setSupportActionBar(mToolbar);
+    }
+  }
+
+  public void handleItemDelete() {
+      Logger.get(this).logImpression(DialerImpression.Type.USER_DELETED_CALL_LOG_ITEM);
+      LogUtil.d("CallDetailsActivity.handleItemDelete", "AsyncTaskExecutor.submit.");
+      AsyncTaskExecutors.createAsyncTaskExecutor().submit(TASK_DELETE, new DeleteCallsTask());
+  }
+  /// @}
 }

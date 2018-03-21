@@ -25,7 +25,10 @@ import com.android.incallui.InCallPresenter.IncomingCallListener;
 import com.android.incallui.call.CallList;
 import com.android.incallui.call.DialerCall;
 import com.android.incallui.call.DialerCall.State;
+import com.mediatek.incallui.video.VideoFeatures;
 import java.util.Objects;
+
+import mediatek.telephony.MtkCarrierConfigManager;
 
 /**
  * This class is responsible for generating video pause/resume requests when the InCall UI is sent
@@ -146,7 +149,7 @@ class VideoPauseController implements InCallStateListener, IncomingCallListener 
     boolean hasPrimaryCallChanged = !Objects.equals(call, mPrimaryCall);
     boolean canVideoPause = videoCanPause(call);
 
-    LogUtil.i(
+    LogUtil.d(
         "VideoPauseController.onStateChange",
         "hasPrimaryCallChanged: %b, videoCanPause: %b, isInBackground: %b",
         hasPrimaryCallChanged,
@@ -287,9 +290,17 @@ class VideoPauseController implements InCallStateListener, IncomingCallListener 
    */
   private void onPause(boolean isInCall) {
     mIsInBackground = true;
-    if (isInCall) {
+    /// M: Check for background video transmission setting to decide whether to
+    /// pause the outgoing video transmission or not when InCall goes to background.
+    VideoFeatures videoFeature = null;
+    if (mPrimaryCall != null) {
+        videoFeature = mPrimaryCall.getVideoFeatures();
+    }
+    if (isInCall && !(videoFeature != null && videoFeature.isContainCarrierConfig(
+        MtkCarrierConfigManager.MTK_KEY_VIDEO_CALL_BACKGROUND_TRANSMISSION))) {
       sendRequest(mPrimaryCall, false);
     }
+    /// @}
   }
 
   private void bringToForeground() {

@@ -35,6 +35,7 @@ import com.android.incallui.InCallPresenter.InCallDetailsListener;
 import com.android.incallui.InCallPresenter.InCallOrientationListener;
 import com.android.incallui.InCallPresenter.InCallStateListener;
 import com.android.incallui.InCallPresenter.IncomingCallListener;
+import com.android.incallui.InCallPresenter.SessionStateListener;
 import com.android.incallui.call.CallList;
 import com.android.incallui.call.DialerCall;
 import com.android.incallui.call.DialerCall.CameraDirection;
@@ -80,6 +81,12 @@ public class VideoCallPresenter
         InCallDetailsListener,
         SurfaceChangeListener,
         InCallPresenter.InCallEventListener,
+        /// M: MediaTek feature. @{
+        InCallPresenter.InCallVideoCallListener,
+        /// @}
+        /// M: ALPS03659894, Update session state to refresh UI. @{
+        SessionStateListener,
+        /// @}
         VideoCallScreenDelegate {
 
   private static boolean mIsVideoMode = false;
@@ -121,6 +128,12 @@ public class VideoCallPresenter
   private boolean mAutoFullScreenPending = false;
   /** Whether if the call is remotely held. */
   private boolean mIsRemotelyHeld = false;
+
+     /**
+     * M: judge current call plays video ringtone state is changed
+     */
+  private boolean mCurrentVideoRingtoneState = false;
+
   /**
    * Runnable which is posted to schedule automatically entering fullscreen mode. Will not auto
    * enter fullscreen mode if the dialpad is visible (doing so would make it impossible to exit the
@@ -173,9 +186,16 @@ public class VideoCallPresenter
     boolean isCallOutgoingPending =
         DialerCall.State.isDialing(callState) || callState == DialerCall.State.CONNECTING;
 
+
+    /// M: ALPS03499391, do not check paused, pause indicates local video state. @{
+    /** Google code:
     return !isPaused
         && (isCallActive || isCallOutgoingPending)
         && VideoProfile.isReceptionEnabled(videoState);
+    */
+    return (isCallActive || isCallOutgoingPending)
+        && VideoProfile.isReceptionEnabled(videoState);
+    /// @}
   }
 
   /**
@@ -270,14 +290,22 @@ public class VideoCallPresenter
     cameraManager.setUseFrontFacingCamera(
         cameraDir == CameraDirection.CAMERA_DIRECTION_FRONT_FACING);
   }
-
+   /**
+     * M: FIXME: changed google's default behavior.
+     * We found a problem that when the call becomes a Tx call, the camera would automatically
+     * changed to the rear one. Google might define this behavior for the user privacy.
+     * But we think it isn't a good user experience to switch the camera unpredictable.
+     * So we use the front one if no camera was specified by the user before.
+     * if our customer wanted to follow google default behavior, just unmark the google code. @{
+     */
   private static int toCameraDirection(int videoState) {
-    return VideoProfile.isTransmissionEnabled(videoState)
+   /* return VideoProfile.isTransmissionEnabled(videoState)
             && !VideoProfile.isBidirectional(videoState)
         ? CameraDirection.CAMERA_DIRECTION_BACK_FACING
-        : CameraDirection.CAMERA_DIRECTION_FRONT_FACING;
+        : CameraDirection.CAMERA_DIRECTION_FRONT_FACING;*/
+    return  CameraDirection.CAMERA_DIRECTION_FRONT_FACING;
   }
-
+  ///@}
   private static boolean isCameraDirectionSet(DialerCall call) {
     return isVideoCall(call) && call.getCameraDir() != CameraDirection.CAMERA_DIRECTION_UNKNOWN;
   }
@@ -325,6 +353,9 @@ public class VideoCallPresenter
     InCallPresenter.getInstance().getLocalVideoSurfaceTexture().setDelegate(new LocalDelegate());
     InCallPresenter.getInstance().getRemoteVideoSurfaceTexture().setDelegate(new RemoteDelegate());
 
+    /// M:add listener here to do something with video
+    InCallPresenter.getInstance().addInCallVideoCallListener(this);
+
     // Register for surface and video events from {@link InCallVideoCallListener}s.
     InCallVideoCallCallbackNotifier.getInstance().addSurfaceChangeListener(this);
     mCurrentVideoState = VideoProfile.STATE_AUDIO_ONLY;
@@ -333,6 +364,9 @@ public class VideoCallPresenter
     InCallPresenter.InCallState inCallState = InCallPresenter.getInstance().getInCallState();
     onStateChange(inCallState, inCallState, CallList.getInstance());
     isVideoCallScreenUiReady = true;
+    /// M: ALPS03659894, Update session state to refresh UI. @{
+    InCallPresenter.getInstance().addSessionListener(this);
+    /// @}
   }
 
   /** Called when the user interface is no longer ready to be used. */
@@ -352,7 +386,15 @@ public class VideoCallPresenter
     InCallPresenter.getInstance().removeIncomingCallListener(this);
     InCallPresenter.getInstance().removeOrientationListener(this);
     InCallPresenter.getInstance().removeInCallEventListener(this);
-    InCallPresenter.getInstance().getLocalVideoSurfaceTexture().setDelegate(null);
+    /// M: [ALPS03567912] fix can't set camera is null when videocallpresenter has clear listner is
+    /// earilier than incallpresenter notify videocallpresenter video state change to audio. in some
+    /// cases,it will lead local video is blurry after send upgrade. @{
+    /// google original code:
+    //InCallPresenter.getInstance().getLocalVideoSurfaceTexture().setDelegate(null);
+    ///@}
+
+    /// M: Remove the listener
+    InCallPresenter.getInstance().removeInCallVideoCallListener(this);
 
     InCallVideoCallCallbackNotifier.getInstance().removeSurfaceChangeListener(this);
 
@@ -364,6 +406,9 @@ public class VideoCallPresenter
     }
 
     isVideoCallScreenUiReady = false;
+    /// M: ALPS03659894, Update session state to refresh UI. @{
+    InCallPresenter.getInstance().removeSessionListener(this);
+    /// @}
   }
 
   /**
@@ -423,12 +468,17 @@ public class VideoCallPresenter
   public void onCameraPermissionGranted() {
     LogUtil.i("VideoCallPresenter.onCameraPermissionGranted", "");
     PermissionsUtil.setCameraPrivacyToastShown(mContext);
-    enableCamera(mPrimaryCall.getVideoCall(), isCameraRequired());
-    showVideoUi(
-        mPrimaryCall.getVideoState(),
-        mPrimaryCall.getState(),
-        mPrimaryCall.getVideoTech().getSessionModificationState(),
-        mPrimaryCall.isRemotelyHeld());
+    /// M: fix null point exception @{
+    if(mPrimaryCall != null ) {
+    ///@}
+        enableCamera(mPrimaryCall.getVideoCall(), isCameraRequired());
+        showVideoUi(
+            /** M: Pass Call to check more infor @{*/ mPrimaryCall, /** @}*/
+            mPrimaryCall.getVideoState(),
+            mPrimaryCall.getState(),
+            mPrimaryCall.getVideoTech().getSessionModificationState(),
+            mPrimaryCall.isRemotelyHeld());
+     }
     InCallPresenter.getInstance().getInCallCameraManager().onCameraPermissionGranted();
   }
 
@@ -499,11 +549,14 @@ public class VideoCallPresenter
       // with a waiting call, since user may choose to ignore/decline the waiting call and
       // this should have no impact on current active video call, that is, we should not
       // change the camera or UI unless the waiting VT call becomes active.
-      primary = callList.getActiveCall();
-      currentCall = callList.getIncomingCall();
-      if (!isActiveVideoCall(primary)) {
-        primary = callList.getIncomingCall();
-      }
+      /// M: The primary call need change to incoming call just like voice call @{
+      //primary = callList.getActiveCall();
+      //currentCall = callList.getIncomingCall();
+      //if (!isActiveVideoCall(primary)) {
+      //  primary = callList.getIncomingCall();
+      //}
+      currentCall = primary = callList.getIncomingCall();
+      /// @}
     } else if (newState == InCallPresenter.InCallState.OUTGOING) {
       currentCall = primary = callList.getOutgoingCall();
     } else if (newState == InCallPresenter.InCallState.PENDING_OUTGOING) {
@@ -608,6 +661,7 @@ public class VideoCallPresenter
 
     // Make sure we hide or show the video UI if needed.
     showVideoUi(
+        /** M: Pass Call to check more infor @{*/ call, /** @}*/
         call.getVideoState(),
         call.getState(),
         call.getVideoTech().getSessionModificationState(),
@@ -690,13 +744,40 @@ public class VideoCallPresenter
     checkForVideoStateChange(call);
     checkForCallStateChange(call);
     checkForOrientationAllowedChange(call);
+    ///M: CMCC Video ringtone support. @{
+    checkForVideoRingtoneStateChange(call);
+    ///@}
     updateFullscreenAndGreenScreenMode(
         call.getState(), call.getVideoTech().getSessionModificationState());
   }
 
+ ///M: CMCC Video ringtone support. @{
+ private void checkForVideoRingtoneStateChange(@Nullable DialerCall call) {
+    boolean hasVideoRingtone = call.can(
+            mediatek.telecom.MtkCall.MtkDetails.MTK_CAPABILITY_VIDEO_RINGTONE);
+    final boolean isVideoRingtoneStateChanged = mCurrentVideoRingtoneState != hasVideoRingtone;
+    Log.d(this,"checkForVideoRingtoneStateChange : hasVideoRingtone = " + hasVideoRingtone +
+            " isVideoRingtoneStateChanged = " + isVideoRingtoneStateChanged);
+    if (!isVideoRingtoneStateChanged) {
+        return;
+    }
+    mCurrentVideoRingtoneState = hasVideoRingtone;
+    // Make sure we hide or show the video UI if needed.
+    showVideoUi(
+        /** M: Pass Call to check more infor @{*/ call, /** @}*/
+       call.getVideoState(),
+        call.getState(),
+        call.getVideoTech().getSessionModificationState(),
+        call.isRemotelyHeld());
+  }
+  ///@}
+
   private void checkForOrientationAllowedChange(@Nullable DialerCall call) {
     InCallPresenter.getInstance()
-        .setInCallAllowsOrientationChange(isVideoCall(call) || isVideoUpgrade(call));
+        .setInCallAllowsOrientationChange((isVideoCall(call)
+            /// M: change device orientation only video call is active
+            && call.getState() == DialerCall.State.ACTIVE)
+            || isVideoUpgrade(call));
   }
 
   private void updateFullscreenAndGreenScreenMode(
@@ -704,8 +785,11 @@ public class VideoCallPresenter
     if (mVideoCallScreen != null) {
       boolean shouldShowFullscreen = InCallPresenter.getInstance().isFullscreen();
       boolean shouldShowGreenScreen =
-          callState == State.DIALING
-              || callState == State.CONNECTING
+          ((callState == State.DIALING
+              || callState == State.CONNECTING)
+              ///M: CMCC Video ringtone support. @{
+              && !mCurrentVideoRingtoneState)
+              ///@}
               || callState == State.INCOMING
               || isVideoUpgrade(sessionModificationState);
       mVideoCallScreen.updateFullscreenAndGreenScreenMode(
@@ -778,8 +862,13 @@ public class VideoCallPresenter
       LogUtil.e("VideoCallPresenter.adjustVideoMode", "error VideoCallScreen is null so returning");
       return;
     }
-
+    /// M: Should init mVideoCall before enter since under some extremely low probability,
+    // recreateView will trigger onSurfaceCreated before checkVideoCallChange, this would
+    // lead to an unexpected result, no surface was set on the video call @{
+    mVideoCall = videoCall;
+    /// @}
     showVideoUi(
+        /** M: Pass Call to check more infor @{*/ call, /** @}*/
         newVideoState,
         call.getState(),
         call.getVideoTech().getSessionModificationState(),
@@ -811,6 +900,12 @@ public class VideoCallPresenter
     if (!isVideoCall(previousVideoState) && isVideoCall(newVideoState)) {
       maybeAutoEnterFullscreen(call);
     }
+    /** M: [ALPS02812002] stop voice recording during vt call @{ */
+    InCallPresenter presenter = InCallPresenter.getInstance();
+    if (call.isRecording()) {
+        presenter.stopVoiceRecording();
+    }
+    /** @} */
   }
 
   private static boolean shouldShowVideoUiForCall(@Nullable DialerCall call) {
@@ -861,6 +956,7 @@ public class VideoCallPresenter
     LogUtil.i("VideoCallPresenter.exitVideoMode", "");
 
     showVideoUi(
+        /** M: Pass Call to check more infor @{*/ mPrimaryCall, /** @}*/
         VideoProfile.STATE_AUDIO_ONLY,
         DialerCall.State.ACTIVE,
         SessionModificationState.NO_REQUEST,
@@ -880,6 +976,7 @@ public class VideoCallPresenter
    * @param callState The call state.
    */
   private void showVideoUi(
+      /** M: Pass Call to check more infor @{*/ DialerCall call, /** @}*/
       int videoState,
       int callState,
       @SessionModificationState int sessionModificationState,
@@ -901,6 +998,8 @@ public class VideoCallPresenter
 
     InCallPresenter.getInstance().enableScreenTimeout(VideoProfile.isAudioOnly(videoState));
     updateFullscreenAndGreenScreenMode(callState, sessionModificationState);
+    /// M: update hide preview state too.
+    updatePreviewHideState(call);
   }
 
   /**
@@ -946,6 +1045,15 @@ public class VideoCallPresenter
         call,
         width,
         height);
+    /**
+     * M: Handle camera dimensionsChange only when have request camera or set surface.
+     * To skip some dir onCameraCapaiblityChange callback.@{
+     */
+    if (mPreviewSurfaceState == PreviewSurfaceState.NONE) {
+        Log.w(this, "onCameraDimensionsChange skip it when camera has set null");
+        return;
+    }
+    /** @} */
     if (mVideoCallScreen == null) {
       LogUtil.e("VideoCallPresenter.onCameraDimensionsChange", "ui is null");
       return;
@@ -1281,5 +1389,74 @@ public class VideoCallPresenter
     return CompatUtils.isVideoCompatible()
         && (VideoProfile.isTransmissionEnabled(videoState)
             || VideoProfile.isReceptionEnabled(videoState));
+  }
+
+  /// M: --------------- MediaTek features ---------------------
+  /**
+   * M: hide Local Preview according to the state hide.
+   * TODO: need reset surface after resume.
+   */
+  @Override
+  public void onHidePreviewRequest(boolean hide) {
+    if (mVideoCallScreen == null) {
+      LogUtil.e("VideoCallPresenter.onHidePreviewRequest",
+          "videoCallScreen is null returning, " + hide);
+      return;
+    }
+    if (mPrimaryCall == null) {
+      LogUtil.e("VideoCallPresenter.onHidePreviewRequest",
+          "mPrimaryCall is null returning, " + hide);
+      return;
+    }
+    mPrimaryCall.setHidePreview(hide);
+    mVideoCallScreen.hidePreview(hide);
+  }
+
+  private void updatePreviewHideState(DialerCall call) {
+    if (mVideoCallScreen == null) {
+      LogUtil.w("VideoCallPresenter.updatePreviewHideState",
+          "videoCallScreen is null returning");
+      return;
+    }
+    if (call == null) {
+      LogUtil.w("VideoCallPresenter.updatePreviewHideState",
+          "mPrimaryCall is null returning");
+      return;
+    }
+    mVideoCallScreen.hidePreview(isVideoCall(call)
+        && (call.isHidePreview()
+        ///M: CMCC Video ringtone support. @{
+        || (mCurrentVideoRingtoneState && !VideoProfile.isTransmissionEnabled(call.getVideoState()))));
+        ///@}
+    LogUtil.i("VideoCallPresenter.updatePreviewHideState",
+            "isVideoCall: %b, isHidePreview: %b, isConferenceCall: %b, hasVideoRingtone: %b",
+            isVideoCall(call), call.isHidePreview(), call.isConferenceCall(), mCurrentVideoRingtoneState);
+  }
+
+  @Override
+  public void onCallDataUsageChanged(long dataUsage) {
+    if (mVideoCallScreen != null) {
+      mVideoCallScreen.updateVideoDebugInfo(dataUsage);
+    }
+  }
+
+  /**
+   * M: ALPS03659894, Update session state to refresh UI.
+   * @param state SessionState
+   */
+  @Override
+  public void onSessionModificationStateChanged(int state) {
+    if (mPrimaryCall == null) {
+      return;
+    }
+
+    if (state == SessionModificationState.NO_REQUEST) {
+      LogUtil.d("VideoCallPresenter.onSessionModificationStateChanged", "");
+
+      updateFullscreenAndGreenScreenMode(
+          mPrimaryCall.getState(), mPrimaryCall.getVideoTech().getSessionModificationState());
+
+      adjustVideoMode(mPrimaryCall);
+    }
   }
 }

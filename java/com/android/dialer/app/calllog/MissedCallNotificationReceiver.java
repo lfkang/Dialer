@@ -38,9 +38,11 @@ public class MissedCallNotificationReceiver extends BroadcastReceiver {
 
   public static final String EXTRA_NOTIFICATION_PHONE_NUMBER =
       "android.telecom.extra.NOTIFICATION_PHONE_NUMBER";
+  private static final String TAG = "MissedCallNotificationReceiver";
 
   @Override
   public void onReceive(Context context, Intent intent) {
+    LogUtil.i(TAG, "onReceive start");
     String action = intent.getAction();
     if (!ACTION_SHOW_MISSED_CALLS_NOTIFICATION.equals(action)) {
       return;
@@ -50,6 +52,7 @@ public class MissedCallNotificationReceiver extends BroadcastReceiver {
         intent.getIntExtra(
             EXTRA_NOTIFICATION_COUNT, CallLogNotificationsService.UNKNOWN_MISSED_CALL_COUNT);
     String phoneNumber = intent.getStringExtra(EXTRA_NOTIFICATION_PHONE_NUMBER);
+    LogUtil.i(TAG, "onReceive count:" + count);
 
     PendingResult pendingResult = goAsync();
 
@@ -71,6 +74,7 @@ public class MissedCallNotificationReceiver extends BroadcastReceiver {
             })
         .build()
         .executeParallel(new Pair<>(count, phoneNumber));
+        LogUtil.i(TAG, "onReceive END");
   }
 
   private static void updateBadgeCount(Context context, int count) {

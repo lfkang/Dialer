@@ -298,6 +298,7 @@ public interface EnrichedCallManager {
   @MainThread
   long getVideoShareInviteSessionId(@NonNull String number);
 
+
   /**
    * Ends the given video share session.
    *

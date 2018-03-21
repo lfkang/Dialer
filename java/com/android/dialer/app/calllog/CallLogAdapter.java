@@ -66,11 +66,13 @@ import com.android.dialer.calldetails.CallDetailsEntries.CallDetailsEntry;
 import com.android.dialer.callintent.CallIntentBuilder;
 import com.android.dialer.calllogutils.PhoneAccountUtils;
 import com.android.dialer.calllogutils.PhoneCallDetails;
+import com.android.dialer.calllogutils.PhoneNumberDisplayUtil;
 import com.android.dialer.common.Assert;
 import com.android.dialer.common.LogUtil;
 import com.android.dialer.common.concurrent.AsyncTaskExecutor;
 import com.android.dialer.common.concurrent.AsyncTaskExecutors;
 import com.android.dialer.configprovider.ConfigProviderBindings;
+import com.android.dialer.compat.CompatUtils;
 import com.android.dialer.enrichedcall.EnrichedCallCapabilities;
 import com.android.dialer.enrichedcall.EnrichedCallComponent;
 import com.android.dialer.enrichedcall.EnrichedCallManager;
@@ -88,7 +90,14 @@ import com.android.dialer.phonenumbercache.ContactInfo;
 import com.android.dialer.phonenumbercache.ContactInfoHelper;
 import com.android.dialer.phonenumberutil.PhoneNumberHelper;
 import com.android.dialer.spam.Spam;
+import com.android.dialer.util.DialerUtils;
 import com.android.dialer.util.PermissionsUtil;
+
+import com.mediatek.dialer.compat.ContactsCompat.PhoneCompat;
+import com.mediatek.dialer.calllog.ConfCallLogInfo;
+import com.mediatek.dialer.ext.ExtensionManager;
+import com.mediatek.dialer.util.DialerFeatureOptions;
+
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -507,7 +516,7 @@ public class CallLogAdapter extends GroupingListAdapter
     mContactInfoCache = contactInfoCache;
 
     if (!PermissionsUtil.hasContactsReadPermissions(activity)) {
-      mContactInfoCache.disableRequestProcessing();
+      mContactInfoCache.disableRequestProcessing(true);
     }
 
     Resources resources = mActivity.getResources();
@@ -551,6 +560,8 @@ public class CallLogAdapter extends GroupingListAdapter
     if (lastExpandedPosition != RecyclerView.NO_POSITION) {
       notifyItemChanged(lastExpandedPosition);
     }
+    // M: Add for Presence
+    ExtensionManager.getCallLogExtension().onExpandViewHolderActions(viewHolder.number);
   }
 
   public void onSaveInstanceState(Bundle outState) {
@@ -638,6 +649,8 @@ public class CallLogAdapter extends GroupingListAdapter
 
   public void onResume() {
     if (PermissionsUtil.hasPermission(mActivity, android.Manifest.permission.READ_CONTACTS)) {
+      /// M: enable request process if permission is enable
+      mContactInfoCache.disableRequestProcessing(false);
       mContactInfoCache.start();
     }
     mContactsPreferences.refreshValue(ContactsPreferences.DISPLAY_ORDER_KEY);
@@ -740,6 +753,7 @@ public class CallLogAdapter extends GroupingListAdapter
 
       if (views.asyncTask != null) {
         views.asyncTask.cancel(true);
+        LogUtil.d("CallLogAdapter.onViewRecycled", "views.asyncTask.cancel true.");
       }
     }
   }
@@ -764,7 +778,7 @@ public class CallLogAdapter extends GroupingListAdapter
    * @param viewHolder The call log list item view holder.
    * @param position The position of the list item.
    */
-  private void bindCallLogListViewHolder(final ViewHolder viewHolder, final int position) {
+  protected void bindCallLogListViewHolder(final ViewHolder viewHolder, final int position) {
     Cursor c = (Cursor) getItem(position);
     if (c == null) {
       return;
@@ -784,9 +798,12 @@ public class CallLogAdapter extends GroupingListAdapter
       views.callLogEntryView.setVisibility(View.VISIBLE);
       // dayGroupHeader will be restored after loadAndRender() if it is needed.
     }
-    if (mCurrentlyExpandedRowId == views.rowId) {
-      views.inflateActionViewStub();
-    }
+    /// M: ALPS03413423  cant inflate action view here,
+    //it will inflated  by showAction(true) in methord of render()@{
+    /*if (mCurrentlyExpandedRowId == views.rowId) {
+             views.inflateActionViewStub();
+       }*/
+    /// @}
     loadAndRender(views, views.rowId, details, callDetailsEntries);
   }
 
@@ -807,6 +824,22 @@ public class CallLogAdapter extends GroupingListAdapter
       final PhoneCallDetails details,
       final CallDetailsEntries callDetailsEntries) {
     LogUtil.d("CallLogAdapter.loadAndRender", "position: %d", views.getAdapterPosition());
+    /// M: ALPS03446184  call log load perfemance{@
+    loadData(views, rowId, details);
+    ExtensionManager.getRCSeCallLogExtension().bindPluginViewForCallLogList(
+         views.primaryActionView.getContext(),
+         (ViewGroup) views.primaryActionView, views.number);
+
+    int currentGroup = getDayGroupForCall(views.rowId);
+    if (currentGroup != details.previousGroup) {
+         views.dayGroupHeaderVisibility = View.VISIBLE;
+         views.dayGroupHeaderText = getGroupDescription(currentGroup);
+    } else {
+         views.dayGroupHeaderVisibility = View.GONE;
+    }
+    render(views, details, rowId);
+    /// @}
+
     // Reset block and spam information since this view could be reused which may contain
     // outdated data.
     views.isSpam = false;
@@ -828,13 +861,14 @@ public class CallLogAdapter extends GroupingListAdapter
         new AsyncTask<Void, Void, Boolean>() {
           @Override
           protected Boolean doInBackground(Void... params) {
+            if (isCancelled()) {
+                return false;
+            }
             views.blockId =
                 mFilteredNumberAsyncQueryHandler.getBlockedIdSynchronous(
                     views.number, views.countryIso);
             details.isBlocked = views.blockId != null;
-            if (isCancelled()) {
-              return false;
-            }
+
             if (mIsSpamEnabled) {
               views.isSpamFeatureEnabled = true;
               // Only display the call as a spam call if there are incoming calls in the list.
@@ -845,26 +879,39 @@ public class CallLogAdapter extends GroupingListAdapter
                           .checkSpamStatusSynchronous(views.number, views.countryIso);
               details.isSpam = views.isSpam;
             }
-            return !isCancelled() && loadData(views, rowId, details);
+            //return !isCancelled() && loadData(views, rowId, details);
+            return !isCancelled();
           }
 
           @Override
           protected void onPostExecute(Boolean success) {
             views.isLoaded = true;
+            /// M: ALPS03446184  call log load perfemance{@
             if (success) {
-              int currentGroup = getDayGroupForCall(views.rowId);
+              /*int currentGroup = getDayGroupForCall(views.rowId);
               if (currentGroup != details.previousGroup) {
                 views.dayGroupHeaderVisibility = View.VISIBLE;
                 views.dayGroupHeaderText = getGroupDescription(currentGroup);
               } else {
                 views.dayGroupHeaderVisibility = View.GONE;
               }
-              render(views, details, rowId);
-            }
+              render(views, details, rowId);*/
+              LogUtil.d(TAG,  "onPostExecute", "views.showActions");
+              /// M: ALPS03581720 only update action
+              ///is shown after got block id info. or block button will
+              ///not become unblock. call button would not hide in delete
+              ///activity when update hide action view, so dont update.
+              if (mCurrentlyExpandedRowId == views.rowId) {
+                mCurrentlyExpandedPosition = views.getAdapterPosition();
+                views.showActions(true);
+              }
+             }
+            /// @}
           }
         };
 
     views.asyncTask = loadDataTask;
+    LogUtil.d("CallLogAdapter.loadAndRender", "AsyncTaskExecutor.submit.");
     mAsyncTaskExecutor.submit(LOAD_DATA_TASK_IDENTIFIER, loadDataTask);
   }
 
@@ -973,6 +1020,28 @@ public class CallLogAdapter extends GroupingListAdapter
     views.callType = cursor.getInt(CallLogQuery.CALL_TYPE);
     views.voicemailUri = cursor.getString(CallLogQuery.VOICEMAIL_URI);
 
+    /// M: [VoLTE ConfCallLog] For Volte Conference CallLog @{
+    long confCallId = -1;
+    if (DialerFeatureOptions.isVolteConfCallLogSupport()) {
+        confCallId = cursor.getLong(CallLogQuery.CONFERENCE_CALL_ID);
+        views.confCallId = confCallId;
+        details.conferenceId = confCallId;
+    }
+    if (confCallId > 0 && !mIsConfCallMemberList) {
+      ArrayList<String> numbers = getConferenceCallNumbers(cursor, count);
+      details.date = getConferenceCallDate(cursor, count);
+      views.confCallLogInfos = getConfCallLogInfos(cursor, count, details);
+      views.confCallNumbers = numbers;
+      int firstCallType = details.callTypes[0];
+      details.callTypes = new int[1];
+      details.callTypes[0] = firstCallType;
+      LogUtil.d(TAG, "Volte ConfCall numbers= " + LogUtil.sanitizePii(numbers) + ", date="
+              + details.date + ", name=" + details.namePrimary);
+    } else {
+      views.confCallLogInfos =null;
+      views.confCallNumbers = null;
+    }
+    /// @}
     return details;
   }
 
@@ -1003,7 +1072,8 @@ public class CallLogAdapter extends GroupingListAdapter
    */
   @WorkerThread
   private boolean loadData(CallLogListItemViewHolder views, long rowId, PhoneCallDetails details) {
-    Assert.isWorkerThread();
+    /// M: ALPS03446184  call log load perfemance
+    //Assert.isWorkerThread();
     if (rowId != views.rowId) {
       LogUtil.i(
           "CallLogAdapter.loadData",
@@ -1022,7 +1092,9 @@ public class CallLogAdapter extends GroupingListAdapter
 
     ContactInfo info = ContactInfo.EMPTY;
     if (PhoneNumberHelper.canPlaceCallsTo(details.number, details.numberPresentation)
-        && !isVoicemailNumber) {
+        && !isVoicemailNumber
+        /**M:[VoLTE ConfCallLog]*/
+        && (views.confCallId <= 0 || mIsConfCallMemberList) ) {
       // Lookup contacts with this number
       // Only do remote lookup in first 5 rows.
       int position = views.getAdapterPosition();
@@ -1034,7 +1106,12 @@ public class CallLogAdapter extends GroupingListAdapter
               position
                   < ConfigProviderBindings.get(mActivity)
                       .getLong("number_of_call_to_do_remote_lookup", 5L));
+    /**M:[VoLTE ConfCallLog] @{*/
+    } else if (DialerFeatureOptions.isVolteConfCallLogSupport()
+        && views.confCallId > 0 && !mIsConfCallMemberList) {
+      details.namePrimary = getConferenceCallName(views.confCallLogInfos);
     }
+    /**@}*/
     CharSequence formattedNumber =
         info.formattedNumber == null
             ? null
@@ -1045,7 +1122,9 @@ public class CallLogAdapter extends GroupingListAdapter
     views.accountHandle = accountHandle;
     details.accountHandle = accountHandle;
 
-    if (!TextUtils.isEmpty(info.name) || !TextUtils.isEmpty(info.nameAlternative)) {
+    if ((!TextUtils.isEmpty(info.name) || !TextUtils.isEmpty(info.nameAlternative))
+            /**M:[VoLTE ConfCallLog]*/
+            && (views.confCallId <= 0 || mIsConfCallMemberList) ) {
       details.contactUri = info.lookupUri;
       details.namePrimary = info.name;
       details.nameAlternative = info.nameAlternative;
@@ -1076,7 +1155,7 @@ public class CallLogAdapter extends GroupingListAdapter
     return true;
   }
 
-  private static String getNumberType(Resources res, PhoneCallDetails details) {
+  private String getNumberType(Resources res, PhoneCallDetails details) {
     // Label doesn't make much sense if the information is coming from CNAP or Cequint Caller ID.
     if (details.sourceType == ContactSource.Type.SOURCE_TYPE_CNAP
         || details.sourceType == ContactSource.Type.SOURCE_TYPE_CEQUINT_CALLER_ID) {
@@ -1086,7 +1165,9 @@ public class CallLogAdapter extends GroupingListAdapter
     if (details.numberType == Phone.TYPE_CUSTOM && TextUtils.isEmpty(details.numberLabel)) {
       return "";
     }
-    return (String) Phone.getTypeLabel(res, details.numberType, details.numberLabel);
+    //return (String) Phone.getTypeLabel(res, details.numberType, details.numberLabel);
+    /// M:Using new API for AAS phone number label lookup
+    return (String)PhoneCompat.getTypeLabel(mActivity, details.numberType, details.numberLabel);
   }
 
   /**
@@ -1094,7 +1175,7 @@ public class CallLogAdapter extends GroupingListAdapter
    * operation into it.
    */
   @MainThread
-  private void render(CallLogListItemViewHolder views, PhoneCallDetails details, long rowId) {
+  protected void render(CallLogListItemViewHolder views, PhoneCallDetails details, long rowId) {
     Assert.isMainThread();
     if (rowId != views.rowId) {
       LogUtil.i(
@@ -1122,6 +1203,14 @@ public class CallLogAdapter extends GroupingListAdapter
       views.checkBoxView.setVisibility(View.GONE);
       views.quickContactView.setVisibility(View.VISIBLE);
     }
+
+    /// M: [Dialer Global Search] Highlight the search text @{
+    if (DialerFeatureOptions.DIALER_GLOBAL_SEARCH && mUpperCaseQueryString != null
+        && mUpperCaseQueryString.length > 0) {
+      mCallLogListItemHelper.setHighlightedText(mUpperCaseQueryString);
+    }
+    /// @}
+
     mCallLogListItemHelper.setPhoneCallDetails(views, details);
     if (mCurrentlyExpandedRowId == views.rowId) {
       // In case ViewHolders were added/removed, update the expanded position if the rowIds
@@ -1133,6 +1222,13 @@ public class CallLogAdapter extends GroupingListAdapter
     }
     views.dayGroupHeader.setVisibility(views.dayGroupHeaderVisibility);
     views.dayGroupHeader.setText(views.dayGroupHeaderText);
+
+    /// M: for Plug-in @{
+    ExtensionManager.getCallLogExtension()
+            .setCallAccountForCallLogList(views.primaryActionView.getContext(),
+                views.primaryActionView, views.accountHandle);
+    /// @}
+
   }
 
   @Override
@@ -1307,7 +1403,7 @@ public class CallLogAdapter extends GroupingListAdapter
   @VisibleForTesting
   void disableRequestProcessingForTest() {
     // TODO: Remove this and test the cache directly.
-    mContactInfoCache.disableRequestProcessing();
+    mContactInfoCache.disableRequestProcessing(true);
   }
 
   @VisibleForTesting
@@ -1435,4 +1531,105 @@ public class CallLogAdapter extends GroupingListAdapter
 
     void tapSelectAll();
   }
+
+  /// M: [VoLTE ConfCallLog] For volte conference callLog @{
+  private static String TAG = "CallLogAdapter";
+
+  private boolean mIsConfCallMemberList = false;
+
+  /**
+   * Is this adapter used to show the conference call member list
+   */
+  public void setIsConfCallMemberList(boolean isConfCallMemberList) {
+    mIsConfCallMemberList = isConfCallMemberList;
+  }
+
+  private ArrayList<String> getConferenceCallNumbers(Cursor cursor, int count) {
+    int position = cursor.getPosition();
+    ArrayList<String> numbers = new ArrayList<String>(count);
+    for (int index = 0; index < count; ++index) {
+      // add postDialDigits when get numbers
+      final String postDialDigits = CompatUtils.isNCompatible() ?
+              cursor.getString(CallLogQuery.POST_DIAL_DIGITS) : "";
+      numbers.add(cursor.getString(CallLogQuery.NUMBER) + postDialDigits);
+      cursor.moveToNext();
+    }
+    cursor.moveToPosition(position);
+    return numbers;
+  }
+
+  private long getConferenceCallDate(Cursor cursor, int count) {
+    int position = cursor.getPosition();
+    long minDate = cursor.getLong(CallLogQuery.DATE);
+    for (int index = 1; index < count; ++index) {
+      cursor.moveToNext();
+      long date = cursor.getLong(CallLogQuery.DATE);
+      if (minDate > date) {
+        minDate = date;
+      }
+    }
+    cursor.moveToPosition(position);
+    return minDate;
+  }
+
+  /**
+   * copy cursor info to ConfCallLogInfo
+   * avoid concurrent read calllog cursor
+   */
+  private ArrayList<ConfCallLogInfo> getConfCallLogInfos(Cursor cursor, int count,
+      final PhoneCallDetails details) {
+    int position = cursor.getPosition();
+
+    final ArrayList<ConfCallLogInfo> confCallLogs = new ArrayList<ConfCallLogInfo>();
+    for (int index = 0; index < count; ++index) {
+      ConfCallLogInfo cc = new ConfCallLogInfo(cursor);
+      confCallLogs.add(cc);
+      cursor.moveToNext();
+    }
+    cursor.moveToPosition(position);
+    return confCallLogs;
+  }
+
+  private String getConferenceCallName(ArrayList<ConfCallLogInfo> confCallLogs) {
+    if(confCallLogs == null) {
+      return "";
+    }
+    final ArrayList<CharSequence> names = new ArrayList<CharSequence>(confCallLogs.size());
+    for(final ConfCallLogInfo cc:confCallLogs) {
+      ContactInfo info = ContactInfo.EMPTY;
+      if (PhoneNumberHelper.canPlaceCallsTo(cc.number, cc.numberPresentation)) {
+        // Lookup contacts with this number
+        info = mContactInfoCache.getValue(cc.number + cc.postDialDigits,
+              cc.countryIso, cc.cachedContactInfo, false);
+      }
+      if (TextUtils.isEmpty(info.name)) {
+        CharSequence formattedNumber = info.formattedNumber == null
+                ? null : PhoneNumberUtilsCompat.createTtsSpannable(info.formattedNumber);
+                CharSequence displayNumber = PhoneNumberDisplayUtil.getDisplayNumber(
+                mActivity,
+                cc.number,
+                cc.numberPresentation,
+                formattedNumber,
+                cc.postDialDigits,
+                false).toString();
+                names.add(displayNumber);
+      } else {
+        names.add(info.name);
+      }
+    }
+    return DialerUtils.join(names).toString();
+  }
+
+  /// M: [Dialer Global Search] New Feature CallLogSearch @{
+  private char[] mUpperCaseQueryString;
+
+  // Add for call log search feature
+  public void setQueryString(String queryString) {
+    if (TextUtils.isEmpty(queryString)) {
+      mUpperCaseQueryString = null;
+    } else {
+      mUpperCaseQueryString = queryString.toUpperCase().toCharArray();
+    }
+  }
+  /// @}
 }

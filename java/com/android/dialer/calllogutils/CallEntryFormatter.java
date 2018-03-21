@@ -30,6 +30,7 @@ import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 import java.util.Locale;
+import java.util.TimeZone;
 import java.util.concurrent.TimeUnit;
 
 /** Utility class for formatting data and data usage in call log entries. */
@@ -106,6 +107,7 @@ public class CallEntryFormatter {
     try {
       Date date = new Date(TimeUnit.SECONDS.toMillis(elapsedSeconds));
       SimpleDateFormat format = new SimpleDateFormat(formatPattern);
+      format.setTimeZone(TimeZone.getTimeZone("UTC"));
       String duration = format.format(date);
 
       // SimpleDateFormat cannot display more than 59 minutes, instead it displays MINUTES % 60.

@@ -49,6 +49,7 @@ import android.widget.ImageButton;
 import android.widget.ImageView;
 import android.widget.TextView;
 import android.widget.Toast;
+
 import com.android.contacts.common.ClipboardUtils;
 import com.android.contacts.common.ContactPhotoManager;
 import com.android.contacts.common.compat.PhoneNumberUtilsCompat;
@@ -91,6 +92,11 @@ import com.android.dialer.phonenumberutil.PhoneNumberHelper;
 import com.android.dialer.telecom.TelecomUtil;
 import com.android.dialer.util.CallUtil;
 import com.android.dialer.util.DialerUtils;
+import com.mediatek.dialer.calllog.ConfCallLogInfo;
+import com.mediatek.dialer.ext.ExtensionManager;
+import com.mediatek.dialer.util.DialerVolteUtils;
+
+import java.util.ArrayList;
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
 
@@ -231,6 +237,12 @@ public final class CallLogListItemViewHolder extends RecyclerView.ViewHolder
 
   public AsyncTask<Void, Void, ?> asyncTask;
   private CallDetailsEntries callDetailsEntries;
+
+  /** M: [VoLTE ConfCallLog] the conference call numbers if it was conference call @{ */
+  public ArrayList<String> confCallNumbers;
+  public ArrayList<ConfCallLogInfo> confCallLogInfos;
+  public long confCallId;
+  /** @} */
 
   private CallLogListItemViewHolder(
       Context context,
@@ -400,7 +412,12 @@ public final class CallLogListItemViewHolder extends RecyclerView.ViewHolder
     } else if (resId == R.id.context_menu_block_report_spam) {
       Logger.get(mContext)
           .logImpression(DialerImpression.Type.CALL_LOG_CONTEXT_MENU_BLOCK_REPORT_SPAM);
-      maybeShowBlockNumberMigrationDialog(
+          /// M: Do not show dialog if activity is paused. @{
+          if (!((Activity) mContext).isResumed() || info == null) {
+             return true;
+          }
+          /// @}
+          maybeShowBlockNumberMigrationDialog(
           new BlockedNumbersMigrator.Listener() {
             @Override
             public void onComplete() {
@@ -410,6 +427,11 @@ public final class CallLogListItemViewHolder extends RecyclerView.ViewHolder
           });
     } else if (resId == R.id.context_menu_block) {
       Logger.get(mContext).logImpression(DialerImpression.Type.CALL_LOG_CONTEXT_MENU_BLOCK_NUMBER);
+      /// M: Do not show dialog if activity is paused. @{
+      if (!((Activity) mContext).isResumed() || info == null) {
+           return true;
+      }
+      /// @}
       maybeShowBlockNumberMigrationDialog(
           new BlockedNumbersMigrator.Listener() {
             @Override
@@ -421,11 +443,21 @@ public final class CallLogListItemViewHolder extends RecyclerView.ViewHolder
     } else if (resId == R.id.context_menu_unblock) {
       Logger.get(mContext)
           .logImpression(DialerImpression.Type.CALL_LOG_CONTEXT_MENU_UNBLOCK_NUMBER);
+      /// M: Do not show dialog if activity is paused. @{
+      if (!((Activity) mContext).isResumed() || info == null) {
+            return true;
+      }
+      /// @}
       mBlockReportListener.onUnblock(
           displayNumber, number, countryIso, callType, info.sourceType, isSpam, blockId);
     } else if (resId == R.id.context_menu_report_not_spam) {
       Logger.get(mContext)
           .logImpression(DialerImpression.Type.CALL_LOG_CONTEXT_MENU_REPORT_AS_NOT_SPAM);
+      /// M: Do not show dialog if activity is paused. @{
+      if (!((Activity) mContext).isResumed() || info == null) {
+          return true;
+      }
+      /// @}
       mBlockReportListener.onReportNotSpam(
           displayNumber, number, countryIso, callType, info.sourceType);
     }
@@ -537,6 +569,17 @@ public final class CallLogListItemViewHolder extends RecyclerView.ViewHolder
                 mContext.getString(R.string.description_call_action), validNameOrNumber));
         primaryActionButtonView.setImageResource(R.drawable.quantum_ic_call_vd_theme_24);
         primaryActionButtonView.setVisibility(View.VISIBLE);
+        /** M: [VoLTE ConfCallLog] For Volte Conference callLog @{ */
+        if (confCallNumbers != null) {
+          if (DialerVolteUtils.isVolteConfCallEnable(mContext)) {
+            primaryActionButtonView.setTag(IntentProvider
+                .getReturnVolteConfCallIntentProvider(confCallNumbers));
+          } else {
+            primaryActionButtonView.setTag(null);
+            primaryActionButtonView.setVisibility(View.GONE);
+          }
+        }
+        /** @} */
       } else {
         primaryActionButtonView.setTag(null);
         primaryActionButtonView.setVisibility(View.GONE);
@@ -549,6 +592,28 @@ public final class CallLogListItemViewHolder extends RecyclerView.ViewHolder
    * buttons.
    */
   private void bindActionButtons() {
+    /** M: [VoLTE ConfCallLog] Only show call detail button for conference callLog @{ */
+    if (confCallNumbers != null) {
+      blockReportView.setVisibility(View.GONE);
+      blockView.setVisibility(View.GONE);
+      unblockView.setVisibility(View.GONE);
+      reportNotSpamView.setVisibility(View.GONE);
+      sendVoicemailButtonView.setVisibility(View.GONE);
+      callButtonView.setVisibility(View.GONE);
+      videoCallButtonView.setVisibility(View.GONE);
+      voicemailPlaybackView.setVisibility(View.GONE);
+      createNewContactButtonView.setVisibility(View.GONE);
+      addToExistingContactButtonView.setVisibility(View.GONE);
+      sendMessageView.setVisibility(View.GONE);
+      callWithNoteButtonView.setVisibility(View.GONE);
+      callComposeButtonView.setVisibility(View.GONE);
+      detailsButtonView.setVisibility(View.VISIBLE);
+      detailsButtonView.setTag(IntentProvider.getCallDetailIntentProvider(callDetailsEntries,
+          buildContact(),/*canReportCallerId*/false, true, false));
+      return;
+    }
+    /** @} */
+
     boolean canPlaceCallToNumber = PhoneNumberHelper.canPlaceCallsTo(number, numberPresentation);
 
     // Hide the call buttons by default. We then set it to be visible when appropriate below.
@@ -648,7 +713,8 @@ public final class CallLogListItemViewHolder extends RecyclerView.ViewHolder
               && mCachedNumberLookupService.canReportAsInvalid(info.sourceType, info.objectId);
       detailsButtonView.setTag(
           IntentProvider.getCallDetailIntentProvider(
-              callDetailsEntries, buildContact(), canReportCallerId));
+              callDetailsEntries, buildContact(), canReportCallerId,
+              false, confCallId > 0));
     }
 
     boolean isBlockedOrSpam = blockId != null || (isSpamFeatureEnabled && isSpam);
@@ -685,6 +751,10 @@ public final class CallLogListItemViewHolder extends RecyclerView.ViewHolder
     callComposeButtonView.setVisibility(isCallComposerCapable ? View.VISIBLE : View.GONE);
 
     updateBlockReportActions(isVoicemailNumber);
+
+    ///M: Plug-in call to customize Action buttons
+    ExtensionManager.getCallLogExtension().customizeBindActionButtons(this);
+    /// @}
   }
 
   private boolean isFullyUndialableVoicemail() {
@@ -721,17 +791,26 @@ public final class CallLogListItemViewHolder extends RecyclerView.ViewHolder
     if (accountHandle == null) {
       return false;
     }
-    if (mDefaultPhoneAccountHandle == null) {
+
+    /// M: show vedio call icon if not support feature of get other phone vedio capability
+    /*if (mDefaultPhoneAccountHandle == null) {
       return false;
     }
-    return accountHandle.getComponentName().equals(mDefaultPhoneAccountHandle.getComponentName());
+
+    return accountHandle.getComponentName().equals(mDefaultPhoneAccountHandle.getComponentName());*/
+    return !(mCallLogCache.canRelyOnVideoPresence());
+    /// @}
   }
 
+  ///M: mtk use self contact presence feature,
+  ///so need change interface of get other phone vedio capability ,not use info.carrierPesence
+  ///need ask contact presene owner the interface name.
   private boolean canSupportCarrierVideoCall() {
     return mCallLogCache.canRelyOnVideoPresence()
         && info != null
         && (info.carrierPresence & Phone.CARRIER_PRESENCE_VT_CAPABLE) != 0;
   }
+
 
   /**
    * Show or hide the action views, such as voicemail, details, and add contact.
@@ -748,8 +827,7 @@ public final class CallLogListItemViewHolder extends RecyclerView.ViewHolder
         // be called again once the item is loaded.
         LogUtil.e(
             "CallLogListItemViewHolder.showActions",
-            "called before item is loaded",
-            new Exception());
+            "called before item is loaded");
         return;
       }
 
@@ -767,6 +845,10 @@ public final class CallLogListItemViewHolder extends RecyclerView.ViewHolder
     }
 
     updatePrimaryActionButton(show);
+
+    /// M: add for plug-in.  @{
+    ExtensionManager.getCallLogExtension().showActions(this, show);
+    /// @}
   }
 
   private void showOrHideVoicemailTranscriptionView(boolean isExpanded) {
@@ -790,7 +872,15 @@ public final class CallLogListItemViewHolder extends RecyclerView.ViewHolder
       return;
     }
 
+    /// M: [VoLTE ConfCallLog] Show Volte Conference contact icon @{
+    final boolean isConference = confCallNumbers != null;
+    if (isConference) {
+      quickContactView.assignContactUri(null);
+    }
+    /// @}
     final String displayName = TextUtils.isEmpty(info.name) ? displayNumber : info.name;
+
+    /// M:[MTK SIM Contacts feature]if this contact is SIM contact,call log need show SIM icon
     ContactPhotoManager.getInstance(mContext)
         .loadDialerThumbnailOrPhoto(
             quickContactView,
@@ -798,7 +888,9 @@ public final class CallLogListItemViewHolder extends RecyclerView.ViewHolder
             info.photoId,
             info.photoUri,
             displayName,
-            getContactType());
+            getContactType(),
+            info.contactSimId,
+            info.isSdnContact);
   }
 
   private @ContactType int getContactType() {
@@ -808,7 +900,7 @@ public final class CallLogListItemViewHolder extends RecyclerView.ViewHolder
         mCachedNumberLookupService != null
             && mCachedNumberLookupService.isBusiness(info.sourceType),
         numberPresentation,
-        false);
+        /**M: [VoLTE ConfCallLog]*/ confCallNumbers != null);
   }
 
   @Override
@@ -836,6 +928,11 @@ public final class CallLogListItemViewHolder extends RecyclerView.ViewHolder
           accountHandle);
     } else if (view.getId() == R.id.block_report_action) {
       Logger.get(mContext).logImpression(DialerImpression.Type.CALL_LOG_BLOCK_REPORT_SPAM);
+      /// M: Do not show dialog if activity is paused. @{
+      if (!((Activity) mContext).isResumed() || info == null) {
+             return;
+      }
+      /// @}
       maybeShowBlockNumberMigrationDialog(
           new BlockedNumbersMigrator.Listener() {
             @Override
@@ -846,6 +943,11 @@ public final class CallLogListItemViewHolder extends RecyclerView.ViewHolder
           });
     } else if (view.getId() == R.id.block_action) {
       Logger.get(mContext).logImpression(DialerImpression.Type.CALL_LOG_BLOCK_NUMBER);
+      /// M: Do not show dialog if activity is paused. @{
+      if (!((Activity) mContext).isResumed() || info == null) {
+            return;
+      }
+      /// @}
       maybeShowBlockNumberMigrationDialog(
           new BlockedNumbersMigrator.Listener() {
             @Override
@@ -856,10 +958,20 @@ public final class CallLogListItemViewHolder extends RecyclerView.ViewHolder
           });
     } else if (view.getId() == R.id.unblock_action) {
       Logger.get(mContext).logImpression(DialerImpression.Type.CALL_LOG_UNBLOCK_NUMBER);
+      /// M: Do not show dialog if activity is paused. @{
+      if (!((Activity) mContext).isResumed() || info == null) {
+            return;
+      }
+      /// @}
       mBlockReportListener.onUnblock(
           displayNumber, number, countryIso, callType, info.sourceType, isSpam, blockId);
     } else if (view.getId() == R.id.report_not_spam_action) {
       Logger.get(mContext).logImpression(DialerImpression.Type.CALL_LOG_REPORT_AS_NOT_SPAM);
+      /// M: Do not show dialog if activity is paused. @{
+      if (!((Activity) mContext).isResumed() || info == null) {
+            return;
+      }
+      /// @}
       mBlockReportListener.onReportNotSpam(
           displayNumber, number, countryIso, callType, info.sourceType);
     } else if (view.getId() == R.id.call_compose_action) {
@@ -946,6 +1058,13 @@ public final class CallLogListItemViewHolder extends RecyclerView.ViewHolder
       simDetails.setColor(mCallLogCache.getAccountColor(accountHandle));
       contact.setSimDetails(simDetails.build());
     }
+    ///M: add post dial digits
+    contact.setPostDialDigits(postDialDigits);
+    ///M: add can edit number before call for call detail footer.
+    boolean canEditNumberBeforeCall = PhoneNumberHelper.canPlaceCallsTo(number, numberPresentation)
+        && !mCallLogCache.isVoicemailNumber(accountHandle, number)
+        && !PhoneNumberHelper.isSipNumber(number);
+    contact.setCanEditNumber(canEditNumberBeforeCall);
     return contact.build();
   }
 
@@ -1042,6 +1161,12 @@ public final class CallLogListItemViewHolder extends RecyclerView.ViewHolder
   @Override
   public void onCreateContextMenu(
       final ContextMenu menu, View v, ContextMenu.ContextMenuInfo menuInfo) {
+    /** M: [VoLTE ConfCallLog] For Volte Conference callLog
+          conference call will not show context menu//@{ */
+    if (confCallNumbers != null || !isLoaded) {
+        return;
+    }/** @} */
+
     if (TextUtils.isEmpty(number)) {
       return;
     }

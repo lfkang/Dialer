@@ -29,6 +29,7 @@ import com.android.incallui.incall.protocol.PrimaryCallState;
 import com.android.incallui.incall.protocol.PrimaryInfo;
 import com.android.incallui.videotech.utils.SessionModificationState;
 import com.android.incallui.videotech.utils.VideoUtils;
+import com.mediatek.incallui.volte.InCallUIVolteUtils;
 
 /**
  * Gets the content of the top row. For example:
@@ -75,6 +76,10 @@ public class TopRow {
       if (!TextUtils.isEmpty(state.callSubject)) {
         label = state.callSubject;
         labelIsSingleLine = false;
+      /// M: [VoLTE conference]incoming volte conference @{
+      } else if (InCallUIVolteUtils.isIncomingVolteConferenceCall()) {
+        label = context.getString(R.string.card_title_incoming_conference);
+      /// @}
       } else {
         label = getLabelForIncoming(context, state);
         // Show phone number if it's not displayed in name (center row) or location field (bottom
@@ -125,7 +130,14 @@ public class TopRow {
 
   private static CharSequence getLabelForIncoming(Context context, PrimaryCallState state) {
     if (state.isVideoCall) {
-      return getLabelForIncomingVideo(context, state.sessionModificationState, state.isWifi);
+      /// M: CTA show phone account for incoming video call.@{
+      if (!TextUtils.isEmpty(state.connectionLabel) && !state.isWifi) {
+        return context.getString(R.string.contact_grid_incoming_video_via_template,
+               state.connectionLabel);
+      } else {
+        return getLabelForIncomingVideo(context, state.sessionModificationState, state.isWifi);
+      }
+      /// @}
     } else if (state.isWifi && !TextUtils.isEmpty(state.connectionLabel)) {
       return state.connectionLabel;
     } else if (isAccount(state)) {
@@ -193,6 +205,10 @@ public class TopRow {
         return context.getString(R.string.incall_video_call_request_timed_out);
       case SessionModificationState.RECEIVED_UPGRADE_TO_VIDEO_REQUEST:
         return getLabelForIncomingVideo(context, state.sessionModificationState, state.isWifi);
+      /// M: Cancel upgrade. @{
+      case SessionModificationState.WAITING_FOR_CANCEL_UPGRADE_RESPONSE:
+        return context.getString(R.string.card_title_cancel_upgrade_requesting);
+      /// @}
       case SessionModificationState.NO_REQUEST:
       default:
         Assert.fail();

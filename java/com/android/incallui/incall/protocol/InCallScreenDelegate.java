@@ -42,4 +42,9 @@ public interface InCallScreenDelegate {
   void onInCallScreenPaused();
 
   Drawable getDefaultContactPhotoDrawable();
+
+  /// M: [Hang up] all/hold @{
+  void onHangupAllClicked();
+  void onHangupHoldClicked();
+  /// @}
 }

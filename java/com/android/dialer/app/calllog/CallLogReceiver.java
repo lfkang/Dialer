@@ -73,6 +73,12 @@ public class CallLogReceiver extends BroadcastReceiver {
               public boolean onCallsFetched(Cursor combinedCursor) {
                 return false;
               }
+              /// M: [Multi-Delete] For CallLog delete @{
+              @Override
+              public void onCallsDeleted() {
+                // Do nothing
+              }
+              /// @}
             })
         .fetchVoicemailStatus();
   }

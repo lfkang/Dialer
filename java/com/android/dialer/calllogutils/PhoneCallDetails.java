@@ -130,6 +130,15 @@ public class PhoneCallDetails {
   public ContactInfo cachedContactInfo;
   public int voicemailId;
   public int previousGroup;
+  /// M: [Dialer Global Search] call log id @{
+  public long callId;
+  // The photo for the contact, if available.
+  public long photoId;
+  public int contactType;
+  /// @}
+
+  ///M: [VoLTE ConfCallLog] record the conference call log id
+  public long conferenceId;
 
   /**
    * Constructor with required fields for the details of a call with a number associated with a

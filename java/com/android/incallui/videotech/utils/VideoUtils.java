@@ -18,9 +18,13 @@ package com.android.incallui.videotech.utils;
 
 import android.content.Context;
 import android.content.pm.PackageManager;
+import android.os.SystemProperties;
 import android.support.annotation.NonNull;
 import android.support.v4.content.ContextCompat;
 import com.android.dialer.util.PermissionsUtil;
+
+
+
 
 public class VideoUtils {
 
@@ -28,7 +32,12 @@ public class VideoUtils {
     return state == SessionModificationState.WAITING_FOR_UPGRADE_TO_VIDEO_RESPONSE
         || state == SessionModificationState.UPGRADE_TO_VIDEO_REQUEST_FAILED
         || state == SessionModificationState.REQUEST_REJECTED
-        || state == SessionModificationState.UPGRADE_TO_VIDEO_REQUEST_TIMED_OUT;
+        || state == SessionModificationState.UPGRADE_TO_VIDEO_REQUEST_TIMED_OUT
+        /// M: cancel upgrade
+        || state == SessionModificationState.WAITING_FOR_CANCEL_UPGRADE_RESPONSE
+        /// M: ALPS03523330 show failed title @{
+        || state == SessionModificationState.REQUEST_FAILED;
+        /// @}
   }
 
   public static boolean hasReceivedVideoUpgradeRequest(@SessionModificationState int state) {
@@ -36,11 +45,27 @@ public class VideoUtils {
   }
 
   public static boolean hasCameraPermissionAndShownPrivacyToast(@NonNull Context context) {
-    return PermissionsUtil.hasCameraPrivacyToastShown(context) && hasCameraPermission(context);
+    /// M:ALPS03473303 only check camera permission on insturment test.incallui will show dialog to
+    ///choose whether allow camera to use or not in video call,but on insturment test can't make
+    ///choose. so incallui will set camera is null to vtservice.VTservice will get stuck. @{
+    return isTestSim() ? hasCameraPermission(context) :
+    ///@}
+           (PermissionsUtil.hasCameraPrivacyToastShown(context) && hasCameraPermission(context));
   }
 
   public static boolean hasCameraPermission(@NonNull Context context) {
     return ContextCompat.checkSelfPermission(context, android.Manifest.permission.CAMERA)
         == PackageManager.PERMISSION_GRANTED;
   }
+
+  /// M:ALPS03473303 only check camera permission on insturment test. @{
+  public static boolean isTestSim() {
+        boolean isTestSim = false;
+        isTestSim = SystemProperties.get("gsm.sim.ril.testsim").equals("1") ||
+                   SystemProperties.get("gsm.sim.ril.testsim.2").equals("1") ||
+                   SystemProperties.get("gsm.sim.ril.testsim.3").equals("1") ||
+                   SystemProperties.get("gsm.sim.ril.testsim.4").equals("1");
+        return isTestSim;
+  }
+  ///@}
 }

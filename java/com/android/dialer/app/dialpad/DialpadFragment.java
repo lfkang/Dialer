@@ -30,6 +30,7 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.pm.PackageManager;
 import android.content.res.Resources;
+import android.database.ContentObserver;
 import android.database.Cursor;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
@@ -37,7 +38,10 @@ import android.media.AudioManager;
 import android.media.ToneGenerator;
 import android.net.Uri;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.SystemProperties;
 import android.os.Trace;
+import android.provider.CallLog;
 import android.provider.Contacts.People;
 import android.provider.Contacts.Phones;
 import android.provider.Contacts.PhonesColumns;
@@ -47,8 +51,10 @@ import android.support.design.widget.FloatingActionButton;
 import android.support.v4.content.ContextCompat;
 import android.telecom.PhoneAccount;
 import android.telecom.PhoneAccountHandle;
+import android.telecom.TelecomManager;
 import android.telephony.PhoneNumberFormattingTextWatcher;
 import android.telephony.PhoneNumberUtils;
+import android.telephony.SubscriptionManager;
 import android.telephony.TelephonyManager;
 import android.text.Editable;
 import android.text.TextUtils;
@@ -65,6 +71,7 @@ import android.view.ViewGroup;
 import android.widget.AdapterView;
 import android.widget.BaseAdapter;
 import android.widget.EditText;
+import android.widget.ImageButton;
 import android.widget.ImageView;
 import android.widget.ListView;
 import android.widget.PopupMenu;
@@ -93,6 +100,12 @@ import com.android.dialer.telecom.TelecomUtil;
 import com.android.dialer.util.CallUtil;
 import com.android.dialer.util.DialerUtils;
 import com.android.dialer.util.PermissionsUtil;
+import com.mediatek.dialer.compat.DialerCompatEx;
+import com.mediatek.dialer.ext.DialpadExtensionAction;
+import com.mediatek.dialer.ext.ExtensionManager;
+import com.mediatek.dialer.util.DialerVolteUtils;
+import com.mediatek.telephony.MtkTelephonyManagerEx;
+
 import java.util.HashSet;
 import java.util.List;
 
@@ -104,7 +117,10 @@ public class DialpadFragment extends Fragment
         AdapterView.OnItemClickListener,
         TextWatcher,
         PopupMenu.OnMenuItemClickListener,
-        DialpadKeyButton.OnPressedListener {
+        DialpadKeyButton.OnPressedListener,
+        /// M: add for plug-in @{
+        DialpadExtensionAction {
+        /// @}{
 
   private static final String TAG = "DialpadFragment";
   private static final boolean DEBUG = DialtactsActivity.DEBUG;
@@ -177,6 +193,9 @@ public class DialpadFragment extends Fragment
   private boolean mStartedFromNewIntent = false;
   private boolean mFirstLaunch = false;
   private boolean mAnimate = false;
+
+  /// M: SOS implementation, to check for SOS support
+  private boolean mIsSupportSOS = SystemProperties.get("persist.mtk_sos_quick_dial").equals("1");
 
   /**
    * Determines whether an add call operation is requested.
@@ -301,6 +320,11 @@ public class DialpadFragment extends Fragment
 
   @Override
   public void afterTextChanged(Editable input) {
+    /// M: avoid NPE if this callback is called after activity finished @{
+    if (getActivity() == null) {
+        return;
+    }
+    /// @}
     // When DTMF dialpad buttons are being pressed, we delay SpecialCharSequenceMgr sequence,
     // since some of SpecialCharSequenceMgr's behavior is too abrupt for the "touch-down"
     // behavior.
@@ -346,7 +370,23 @@ public class DialpadFragment extends Fragment
       mCallStateReceiver = new CallStateReceiver();
       getActivity().registerReceiver(mCallStateReceiver, callStateIntentFilter);
     }
+
+    /// M: for Plug-in @{
+    ExtensionManager.getDialPadExtension().onCreate(
+            getActivity().getApplicationContext(), this, this);
+    /// @}
+
     Trace.endSection();
+  }
+
+  /**
+   * M: for plug-in, init customer view.
+   */
+  @Override
+  public void onViewCreated(View view, Bundle savedInstanceState) {
+      Trace.beginSection(TAG + " onViewCreated init plugin");
+      ExtensionManager.getDialPadExtension().onViewCreated(getActivity(), view);
+      Trace.endSection();
   }
 
   @Override
@@ -360,6 +400,21 @@ public class DialpadFragment extends Fragment
     Trace.endSection();
 
     Trace.beginSection(TAG + " setup views");
+
+    ///M: WFC @{
+    mContext = getActivity();
+    IntentFilter filter = new IntentFilter();
+    filter.addAction(TelecomManager.ACTION_PHONE_ACCOUNT_REGISTERED);
+    filter.addAction(TelecomManager.ACTION_PHONE_ACCOUNT_UNREGISTERED);
+    mContext.registerReceiver(mReceiver, filter);
+    ///@}
+
+    /// M: for plug-in @{
+    Trace.beginSection(TAG + " init plugin view");
+    ExtensionManager.getDialPadExtension().onCreateView(inflater, container,
+            savedState, fragmentView);
+    Trace.endSection();
+    /// @}
 
     mDialpadView = (DialpadView) fragmentView.findViewById(R.id.dialpad_view);
     mDialpadView.setCanDigitsBeEdited(true);
@@ -411,9 +466,20 @@ public class DialpadFragment extends Fragment
 
     FloatingActionButton floatingActionButton =
         (FloatingActionButton) fragmentView.findViewById(R.id.dialpad_floating_action_button);
-    floatingActionButton.setOnClickListener(this);
-    mFloatingActionButtonController =
-        new FloatingActionButtonController(getActivity(), floatingActionButton);
+
+    /// M: Need to check if floatingActionButton is null. because in CT
+    // project, OP09 plugin will modify Dialpad layout and floatingActionButton
+    // will be null in that case. @{
+    if (null != floatingActionButton) {
+        floatingActionButton.setOnClickListener(this);
+        mFloatingActionButtonController =
+                new FloatingActionButtonController(getActivity(), floatingActionButton);
+    }
+    /// @}
+
+    /// M: Fix CR ALPS01863413. Update text field view for ADN query.
+    SpecialCharSequenceMgr.updateTextFieldView(mDigits);
+
     Trace.endSection();
     Trace.endSection();
     return fragmentView;
@@ -595,6 +661,14 @@ public class DialpadFragment extends Fragment
     // Long-pressing zero button will enter '+' instead.
     final DialpadKeyButton zero = (DialpadKeyButton) fragmentView.findViewById(R.id.zero);
     zero.setOnLongClickListener(this);
+
+    /// M: SOS Implementation, Long-pressing nine button will dial ECC @{
+    LogUtil.d(TAG, "SOS quick dial support support:" + mIsSupportSOS);
+    if (mIsSupportSOS) {
+        final DialpadKeyButton nine = (DialpadKeyButton) fragmentView.findViewById(R.id.nine);
+        nine.setOnLongClickListener(this);
+    }
+    /// @}
   }
 
   @Override
@@ -638,6 +712,10 @@ public class DialpadFragment extends Fragment
     mFloatingActionButtonController.changeIcon(
         res.getDrawable(iconId, null), res.getString(R.string.description_dial_button));
 
+    /// M: [VoLTE ConfCall] initialize value about conference call capability.
+    mVolteConfCallEnabled = supportOneKeyConference(getActivity());
+    LogUtil.d(TAG, "onResume mVolteConfCallEnabled = " + mVolteConfCallEnabled);
+
     final DialtactsActivity activity = (DialtactsActivity) getActivity();
     mDialpadQueryListener = activity;
 
@@ -650,6 +728,13 @@ public class DialpadFragment extends Fragment
     stopWatch.lap("qloc");
 
     final ContentResolver contentResolver = activity.getContentResolver();
+
+    /// M: [ALPS01858019] add listener to observer CallLog changes
+    if(PermissionsUtil.hasPhonePermissions(getContext())) {
+      contentResolver.registerContentObserver(CallLog.CONTENT_URI, true, mCallLogObserver);
+    } else {
+      LogUtil.w(TAG, "can not register CallLog observer without permission.");
+    }
 
     // retrieve the DTMF tone play back setting.
     mDTMFToneEnabled =
@@ -670,6 +755,9 @@ public class DialpadFragment extends Fragment
       showDialpadChooser(false);
     }
 
+    ///M: WFC @{
+    updateWfcUI();
+    ///@}
     stopWatch.lap("hnt");
 
     updateDeleteButtonEnabledState();
@@ -693,6 +781,13 @@ public class DialpadFragment extends Fragment
       onHiddenChanged(false);
     }
 
+    /** M: [VoLTE ConfCall] Always show overflow menu button for conf call. @{ */
+    if (mVolteConfCallEnabled) {
+      mOverflowMenuButton.setVisibility(View.VISIBLE);
+      mOverflowMenuButton.setAlpha(1);
+    }
+    /** @} */
+
     mFirstLaunch = false;
     Trace.endSection();
   }
@@ -710,6 +805,8 @@ public class DialpadFragment extends Fragment
     mLastNumberDialed = EMPTY_NUMBER; // Since we are going to query again, free stale number.
 
     SpecialCharSequenceMgr.cleanup();
+    /// M: [ALPS01858019] add unregister the call log observer.
+    getActivity().getContentResolver().unregisterContentObserver(mCallLogObserver);
   }
 
   @Override
@@ -743,6 +840,16 @@ public class DialpadFragment extends Fragment
       mPseudoEmergencyAnimator = null;
     }
     getActivity().unregisterReceiver(mCallStateReceiver);
+    /// M: for plug-in. @{
+    ExtensionManager.getDialPadExtension().onDestroy();
+    /// @}
+    ///M: Fix ALPS03664503, when change multiwindow, popup
+    // menu should be dismiss @{
+    if (mOverflowPopupMenu != null) {
+      LogUtil.i("onDestroy()","mOverflowPopupMenu.dismiss()");
+      mOverflowPopupMenu.dismiss();
+    }
+    /// @}
   }
 
   private void keyPressed(int keyCode) {
@@ -878,11 +985,16 @@ public class DialpadFragment extends Fragment
             boolean enable = !isDigitsEmpty();
             for (int i = 0; i < menu.size(); i++) {
               MenuItem item = menu.getItem(i);
-              item.setEnabled(enable);
+              /// M: [VoLTE ConfCall] Change visible to hide some menu instead of setEnable()
+              item.setVisible(enable);
               if (item.getItemId() == R.id.menu_call_with_note) {
                 item.setVisible(CallUtil.isCallWithSubjectSupported(getContext()));
               }
             }
+            /** M: [VoLTE ConfCall] Show conference call menu for volte. @{ */
+            boolean visible = mVolteConfCallEnabled;
+            menu.findItem(R.id.menu_volte_conf_call).setVisible(visible);
+            /** @} */
             super.show();
           }
         };
@@ -904,6 +1016,10 @@ public class DialpadFragment extends Fragment
         mDigits.setCursorVisible(true);
       }
     } else if (resId == R.id.dialpad_overflow) {
+    /// M: for plug-in @{
+    ExtensionManager.getDialPadExtension().constructPopupMenu(
+                    mOverflowPopupMenu, mOverflowMenuButton, mOverflowPopupMenu.getMenu());
+    /// @}
       mOverflowPopupMenu.show();
     } else {
       LogUtil.w("DialpadFragment.onClick", "Unexpected event from: " + view);
@@ -968,6 +1084,18 @@ public class DialpadFragment extends Fragment
       stopTone();
       mPressedDialpadKeys.remove(view);
       return true;
+    } else if (id == R.id.nine) {
+        ///M: SOS implementation, long press 9 dials ECC @{
+        if (mIsSupportSOS) {
+            LogUtil.d(TAG, "Nine button long pressed, initiate ECC call");
+            final Intent intent =
+                     new CallIntentBuilder("112", CallInitiationType.Type.DIALPAD).build();
+            DialerUtils.startActivityWithErrorToast(getActivity(), intent);
+            hideAndClearDialpad(false);
+            return true;
+        }
+        /// @}
+        return false;
     } else if (id == R.id.digits) {
       mDigits.setCursorVisible(true);
       return false;
@@ -1016,6 +1144,15 @@ public class DialpadFragment extends Fragment
    * described above).
    */
   private void handleDialButtonPressed() {
+    ///M: Fix for ALPS03581591, if Dialpad is not shown, FAB
+    // cannot be pressed @{
+    if (!((DialtactsActivity) getActivity()).isDialpadShown()) {
+        LogUtil.i(
+            "DialpadFragment.handleDialButtonPressed",
+            "Dialpad is not shown, return !");
+        return;
+    }
+    // @}
     if (isDigitsEmpty()) { // No number entered.
       // No real call made, so treat it as a click
       PerformanceReport.recordClick(UiAction.Type.PRESS_CALL_BUTTON_WITHOUT_CALLING);
@@ -1056,8 +1193,9 @@ public class DialpadFragment extends Fragment
     }
   }
 
-  private void handleDialButtonClickWithEmptyDigits() {
-    if (phoneIsCdma() && isPhoneInUse()) {
+  public void handleDialButtonClickWithEmptyDigits() {
+    /// M:refactor CDMA phone is in call check
+    if (/*phoneIsCdma() && isPhoneInUse()*/isCdmaInCall()) {
       // TODO: Move this logic into services/Telephony
       //
       // This is really CDMA specific. On GSM is it possible
@@ -1189,7 +1327,14 @@ public class DialpadFragment extends Fragment
         mOverflowPopupMenu.dismiss();
       }
 
-      mFloatingActionButtonController.setVisible(false);
+      /// M: Need to check if floatingActionButton is null. because in CT
+      // project, OP09 plugin will modify Dialpad layout and floatingActionButton
+      // will be null in that case. @{
+      if (mFloatingActionButtonController != null) {
+          mFloatingActionButtonController.setVisible(false);
+      }
+      /// @}
+
       mDialpadChooser.setVisibility(View.VISIBLE);
 
       // Instantiate the DialpadChooserAdapter and hook it up to the
@@ -1208,13 +1353,18 @@ public class DialpadFragment extends Fragment
 
       // mFloatingActionButtonController must also be 'scaled in', in order to be visible after
       // 'scaleOut()' hidden method.
-      if (!mFloatingActionButtonController.isVisible()) {
+      if (mFloatingActionButtonController != null &&
+          !mFloatingActionButtonController.isVisible()) {
         // Just call 'scaleIn()' method if the mFloatingActionButtonController was not already
         // previously visible.
         mFloatingActionButtonController.scaleIn(0);
       }
       mDialpadChooser.setVisibility(View.GONE);
     }
+
+    /// M: for plug-in @{
+    ExtensionManager.getDialPadExtension().showDialpadChooser(enabled);
+    /// @}
   }
 
   /** @return true if we're currently showing the "dialpad chooser" UI. */
@@ -1289,6 +1439,14 @@ public class DialpadFragment extends Fragment
     } else if (resId == R.id.menu_add_wait) {
       updateDialString(WAIT);
       return true;
+    /** M: [VoLTE ConfCall] handle conference call menu. @{ */
+    } else if (resId == R.id.menu_volte_conf_call) {
+      Activity activity = getActivity();
+      if (activity != null) {
+        DialerVolteUtils.handleMenuVolteConfCall(activity);
+      }
+      return true;
+    /** @} */
     } else if (resId == R.id.menu_call_with_note) {
       CallSubjectDialog.start(getActivity(), mDigits.getText().toString());
       hideAndClearDialpad(false);
@@ -1349,10 +1507,19 @@ public class DialpadFragment extends Fragment
    * @param transitionIn True if transitioning in, False if transitioning out
    */
   private void updateMenuOverflowButton(boolean transitionIn) {
+    /** M: Fix for issue ALPS03475682 @{ */
+      mVolteConfCallEnabled = supportOneKeyConference(getActivity());
+      LogUtil.d("updateMenuOverflowButton", "mVolteConfCallEnabled = " + mVolteConfCallEnabled);
+    /** @} */
+    /** M: [VoLTE ConfCall] Always show overflow menu button for conf call. @{ */
+    //if (mVolteConfCallEnabled) {
+    //  return;
+    //}
+    /** @} */
     mOverflowMenuButton = mDialpadView.getOverflowMenuButton();
     if (transitionIn) {
       AnimUtils.fadeIn(mOverflowMenuButton, AnimUtils.DEFAULT_DURATION);
-    } else {
+     } else if (!mVolteConfCallEnabled) {
       AnimUtils.fadeOut(mOverflowMenuButton, AnimUtils.DEFAULT_DURATION);
     }
   }
@@ -1431,6 +1598,7 @@ public class DialpadFragment extends Fragment
   @Override
   public void onHiddenChanged(boolean hidden) {
     super.onHiddenChanged(hidden);
+    LogUtil.d(TAG,"onHiddenChanged hidden = " + hidden);
     final DialtactsActivity activity = (DialtactsActivity) getActivity();
     if (activity == null || getView() == null) {
       return;
@@ -1440,18 +1608,56 @@ public class DialpadFragment extends Fragment
       if (mAnimate) {
         dialpadView.animateShow();
       }
-      mFloatingActionButtonController.setVisible(false);
-      mFloatingActionButtonController.scaleIn(mAnimate ? mDialpadSlideInDuration : 0);
+      /// M: [VoLTE ConfCall] initialize value about conference call capability. @{
+      mVolteConfCallEnabled = supportOneKeyConference(getActivity());
+      LogUtil.d(TAG, "onHiddenChanged false mVolteConfCallEnabled = " + mVolteConfCallEnabled);
+      // Always show overflow menu button for conf call, otherwise hide it.
+      if (mOverflowMenuButton != null) {
+        if (mVolteConfCallEnabled) {
+          mOverflowMenuButton.setVisibility(View.VISIBLE);
+          mOverflowMenuButton.setAlpha(1);
+        } else if (isDigitsEmpty()) {
+          mOverflowMenuButton.setVisibility(View.INVISIBLE);
+        }
+      }
+      /// @}
+
+      /// M: Need to check if floatingActionButton is null. because in CT
+      // project, OP09 plugin will modify Dialpad layout and floatingActionButton
+      // will be null in that case. @{
+      if (mFloatingActionButtonController != null) {
+          mFloatingActionButtonController.setVisible(false);
+          mFloatingActionButtonController.scaleIn(mAnimate ? mDialpadSlideInDuration : 0);
+      }
+      /// @}
+
+      /// M: for Plug-in @{
+      ExtensionManager.getDialPadExtension().onHiddenChanged(
+            true, mAnimate ? mDialpadSlideInDuration : 0);
+      /// @}
+
       activity.onDialpadShown();
       mDigits.requestFocus();
+      updateWfcUI();
     }
-    if (hidden) {
+
+    /// M: Need to check if floatingActionButton is null. because in CT
+    // project, OP09 plugin will modify Dialpad layout and floatingActionButton
+    // will be null in that case. @{
+    if (hidden && mFloatingActionButtonController != null) {
       if (mAnimate) {
         mFloatingActionButtonController.scaleOut();
       } else {
         mFloatingActionButtonController.setVisible(false);
       }
     }
+
+    /// M: for Plug-in @{
+    if (hidden && mAnimate) {
+        ExtensionManager.getDialPadExtension().onHiddenChanged(false, 0);
+    }
+      /// @}
+
   }
 
   public boolean getAnimate() {
@@ -1707,4 +1913,115 @@ public class DialpadFragment extends Fragment
       }
     }
   }
+
+  /// M: Mediatek start.
+  /** M: [ALPS01858019] add listener observer CallLog changes. @{ */
+  private ContentObserver mCallLogObserver = new ContentObserver(new Handler()) {
+    public void onChange(boolean selfChange) {
+      if (DialpadFragment.this.isAdded()) {
+        LogUtil.d(TAG, "Observered the CallLog changes. queryLastOutgoingCall");
+        queryLastOutgoingCall();
+      }
+    };
+  };
+  /** @} */
+
+  /** M: add for check CDMA phone is in call or not. @{ */
+  private boolean isCdmaInCall() {
+    for (int subId : SubscriptionManager.from(mContext).getActiveSubscriptionIdList()) {
+      if ((TelephonyManager.from(mContext).getCallState(subId) != TelephonyManager.CALL_STATE_IDLE)
+          && (TelephonyManager.from(mContext).getCurrentPhoneType(subId)
+              == TelephonyManager.PHONE_TYPE_CDMA)) {
+        LogUtil.d(TAG, "Cdma In Call");
+        return true;
+      }
+    }
+    return false;
+  }
+  /** @} */
+
+  /** M: [VoLTE ConfCall] indicated phone account has volte conference capability. */
+  private boolean mVolteConfCallEnabled = false;
+  /**
+   * M: [VoLTE ConfCall] Checking whether the volte conference is supported or not.
+   * @param context
+   * @return ture if volte conference is supported
+   */
+  private boolean supportOneKeyConference(Context context) {
+    // We have to requery contacts numbers from provider now.
+    // Which requires contacts permissions.
+    final boolean hasContactsPermission = PermissionsUtil.hasContactsReadPermissions(context);
+    return DialerVolteUtils.isVolteConfCallEnable(context) && hasContactsPermission;
+  }
+
+  ///M: WFC @{
+  private static final String SCHEME_TEL = PhoneAccount.SCHEME_TEL;
+  private Context mContext;
+
+  /* *
+    * Update the dialer icon based on WFC is registered or not.
+    *
+    */
+  private void updateWfcUI() {
+    final View floatingActionButton = (ImageButton) getView().findViewById(
+        R.id.dialpad_floating_action_button);
+    if (floatingActionButton != null && DialerCompatEx.isWfcCompat()) {
+      ImageView dialIcon = (ImageView) floatingActionButton;
+      PhoneAccountHandle defaultAccountHandle = TelecomUtil.getDefaultOutgoingPhoneAccount(
+          getActivity(), SCHEME_TEL);
+      LogUtil.d(TAG, "[WFC] defaultAccountHandle: " + defaultAccountHandle);
+      if (defaultAccountHandle != null) {
+        PhoneAccount phoneAccount = TelecomUtil
+            .getPhoneAccount(getActivity(), defaultAccountHandle);
+        LogUtil.d(TAG, "[WFC] Phone Account: " + phoneAccount);
+        if (phoneAccount != null) {
+          TelephonyManager telephonyManager = mContext.getSystemService(TelephonyManager.class);
+          int subId = telephonyManager.getSubIdForPhoneAccount(phoneAccount);
+          boolean wfcCapability = MtkTelephonyManagerEx.getDefault().isWifiCallingEnabled(subId);
+          LogUtil.d(TAG, "[WFC] WFC Capability: " + wfcCapability + " (subId= " + subId + ")");
+          if (wfcCapability) {
+            dialIcon.setImageDrawable(getResources().getDrawable(R.drawable.mtk_fab_ic_wfc));
+            LogUtil.d(TAG, "[WFC] Dial Icon is changed to WFC dial icon");
+          } else {
+            dialIcon.setImageDrawable(getResources().getDrawable(
+                R.drawable.quantum_ic_call_white_24));
+          }
+        } else {
+          dialIcon
+              .setImageDrawable(getResources().getDrawable(R.drawable.quantum_ic_call_white_24));
+        }
+      } else {
+        dialIcon.setImageDrawable(getResources().getDrawable(R.drawable.quantum_ic_call_white_24));
+      }
+    }
+  }
+
+  /**
+   * M: add for plug-in.
+   */
+  @Override
+  public void doCallOptionHandle(Intent intent) {
+      DialerUtils.startActivityWithErrorToast(getActivity(), intent);
+      hideAndClearDialpad(false);
+  }
+
+  private BroadcastReceiver mReceiver = new BroadcastReceiver() {
+    @Override
+    public void onReceive(Context context, Intent intent) {
+      String action = intent.getAction();
+      if (TelecomManager.ACTION_PHONE_ACCOUNT_REGISTERED.equals(action)
+          || TelecomManager.ACTION_PHONE_ACCOUNT_UNREGISTERED.equals(action)) {
+        LogUtil.i(TAG, "[WFC] Intent recived is " + intent.getAction());
+        updateWfcUI();
+      }
+    }
+  };
+
+  @Override
+  public void onDestroyView() {
+    super.onDestroyView();
+    mContext.unregisterReceiver(mReceiver);
+  }
+  ///@}
+  /// M: Mediatek end.
 }

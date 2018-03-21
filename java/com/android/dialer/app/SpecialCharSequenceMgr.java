@@ -28,16 +28,20 @@ import android.content.DialogInterface;
 import android.content.Intent;
 import android.database.Cursor;
 import android.net.Uri;
+import android.os.PowerManager;
+import android.os.SystemProperties;
 import android.provider.Settings;
 import android.support.annotation.Nullable;
 import android.telecom.PhoneAccount;
 import android.telecom.PhoneAccountHandle;
+import android.telecom.TelecomManager;
 import android.telephony.PhoneNumberUtils;
 import android.telephony.TelephonyManager;
 import android.text.TextUtils;
 import android.view.WindowManager;
 import android.widget.EditText;
 import android.widget.Toast;
+import android.os.SystemProperties;
 import com.android.common.io.MoreCloseables;
 import com.android.contacts.common.compat.TelephonyManagerCompat;
 import com.android.contacts.common.database.NoNullCursorAsyncQueryHandler;
@@ -49,6 +53,12 @@ import com.android.dialer.common.Assert;
 import com.android.dialer.common.LogUtil;
 import com.android.dialer.oem.MotorolaUtils;
 import com.android.dialer.telecom.TelecomUtil;
+import com.android.internal.telephony.PhoneConstants;
+import com.mediatek.contacts.simcontact.SubInfoUtils;
+import com.mediatek.dialer.compat.PowerManagerCompat;
+import com.mediatek.dialer.ext.ExtensionManager;
+import com.mediatek.dialer.util.DialerFeatureOptions;
+
 import java.util.ArrayList;
 import java.util.List;
 
@@ -71,11 +81,28 @@ public class SpecialCharSequenceMgr {
 
   private static final String MMI_IMEI_DISPLAY = "*#06#";
   private static final String MMI_REGULATORY_INFO_DISPLAY = "*#07#";
+
+  /// M: add for handle reboot meta secret code @{
+  private static final String FK_SUPPORTED = "1";
+  private static final String FK_REBOOT_META_SUPPORT = "ro.mtk_rebootmeta_support";
+  private static final String MMI_USB_REBOOT_META_SECRET_CODE = "*#*#3641122#*#*";
+  private static final String MMI_WIFI_REBOOT_META_SECRET_CODE = "*#*#3642233#*#*";
+  private static final String ATM_FLAG_PROP = "ro.boot.atm";
+  private static final String ATM_ENABLED = "enable";
+  /// @}
+
   /** ***** This code is used to handle SIM Contact queries ***** */
   private static final String ADN_PHONE_NUMBER_COLUMN_NAME = "number";
 
   private static final String ADN_NAME_COLUMN_NAME = "name";
   private static final int ADN_QUERY_TOKEN = -1;
+  /// M: [ALPS01764940]Add index to indicate the queried contacts @{
+  private static final String ADN_ID_COLUMN_NAME = "index";
+  /// @}
+  /// M: Add for query SIM Contact additional Number, only used when SIM Contact phone type
+  /// number is not set.
+  private static final String ADN_ADDITIONAL_PHONE_NUMBER_COLUMN_NAME = "additionalNumber";
+
   /**
    * Remembers the previous {@link QueryHandler} and cancel the operation when needed, to prevent
    * possible crash.
@@ -103,7 +130,11 @@ public class SpecialCharSequenceMgr {
         || handleRegulatoryInfoDisplay(context, dialString)
         || handlePinEntry(context, dialString)
         || handleAdnEntry(context, dialString, textField)
-        || handleSecretCode(context, dialString)) {
+        || handleSecretCode(context, dialString)
+        /// M: for plug-in @{
+        || ExtensionManager.getDialPadExtension().handleChars(context,
+                dialString)) {
+        /// @}
       return true;
     }
 
@@ -138,10 +169,27 @@ public class SpecialCharSequenceMgr {
   static boolean handleSecretCode(Context context, String input) {
     // Secret codes are accessed by dialing *#*#<code>#*#*
 
+    /// M: for plug-in @{
+    input = ExtensionManager.getDialPadExtension().handleSecretCode(input);
+    /// @}
+
     int len = input.length();
     if (len <= 8 || !input.startsWith("*#*#") || !input.endsWith("#*#*")) {
       return false;
     }
+
+    String atmFlag = readATMFlag();
+
+    /// M:start meta_info_activity in ATM mode @{
+    if(ATM_ENABLED.equals(atmFlag) && MMI_WIFI_REBOOT_META_SECRET_CODE.equals(input)) {
+      LogUtil.d(TAG,"start meta_info_activity");
+      Intent intent = new Intent();
+      intent.setAction("android.settings.Atm_Wifi_Activity");
+      context.startActivity(intent);
+      return true;
+    }
+    /// @}
+
     String secretCode = input.substring(4, len - 4);
     TelephonyManagerCompat.handleSecretCode(context, secretCode);
     return true;
@@ -158,7 +206,10 @@ public class SpecialCharSequenceMgr {
     TelephonyManager telephonyManager =
         (TelephonyManager) context.getSystemService(Context.TELEPHONY_SERVICE);
     if (telephonyManager == null
-        || telephonyManager.getPhoneType() != TelephonyManager.PHONE_TYPE_GSM) {
+        || (telephonyManager.getPhoneType() != TelephonyManager.PHONE_TYPE_GSM
+                // M: support CDMA ADN requests
+                && telephonyManager.getPhoneType() != TelephonyManager.PHONE_TYPE_CDMA)) {
+
       return false;
     }
 
@@ -178,6 +229,12 @@ public class SpecialCharSequenceMgr {
         // get the ordinal number of the sim contact
         final int index = Integer.parseInt(input.substring(0, len - 1));
 
+        /// M: Fix ALPS02287171. The index of ADN starts from 1. @{
+        if (index <= 0) {
+          return false;
+        }
+        /// @}
+
         // The original code that navigated to a SIM Contacts list view did not
         // highlight the requested contact correctly, a requirement for PTCRB
         // certification.  This behaviour is consistent with the UI paradigm
@@ -186,14 +243,20 @@ public class SpecialCharSequenceMgr {
         // the dialer text field.
 
         // create the async query handler
-        final QueryHandler handler = new QueryHandler(context.getContentResolver());
+        final QueryHandler handler = new QueryHandler(context.getContentResolver(),
+            (Activity)context);
 
         // create the cookie object
+        /// M: Query will return cursor with exact index no here.
         final SimContactQueryCookie sc =
-            new SimContactQueryCookie(index - 1, handler, ADN_QUERY_TOKEN);
+            new SimContactQueryCookie(index/** - 1*/, handler, ADN_QUERY_TOKEN);
+
+        /// M: Fix CR ALPS01863413. Record the ADN query cookie.
+        sSimContactQueryCookie = sc;
 
         // setup the cookie fields
-        sc.contactNum = index - 1;
+        /// M: No need to set.
+        //sc.contactNum = index - 1;
         sc.setTextField(textField);
 
         // create the progress dialog
@@ -214,7 +277,23 @@ public class SpecialCharSequenceMgr {
                     applicationContext, PhoneAccount.SCHEME_TEL));
 
         if (subscriptionAccountHandles.size() <= 1 || hasUserSelectedDefault) {
-          Uri uri = TelecomUtil.getAdnUriForPhoneAccount(applicationContext, null);
+          /// M: to support CDMA ADN query, uri should change to PBR if CDMA sim @{
+          /**
+           * orignal code:
+           * Uri uri = TelecomUtil.getAdnUriForPhoneAccount(applicationContext, null);
+           */
+          final TelecomManager telecomManager = (TelecomManager) context
+              .getSystemService(Context.TELECOM_SERVICE);
+          PhoneAccountHandle accountHandle = hasUserSelectedDefault ? telecomManager
+              .getDefaultOutgoingPhoneAccount(PhoneAccount.SCHEME_TEL)
+              : (subscriptionAccountHandles.size() > 0 ? subscriptionAccountHandles.get(0) : null);
+          int subId = TelephonyManager.getDefault().getSubIdForPhoneAccount(
+              telecomManager.getPhoneAccount(accountHandle));
+          if (!SubInfoUtils.checkSubscriber(subId)) {
+            return false;
+          }
+          Uri uri = SubInfoUtils.getIccProviderUri(subId);
+          /// @}
           handleAdnQuery(handler, sc, uri);
         } else {
           SelectPhoneAccountListener callback =
@@ -244,14 +323,16 @@ public class SpecialCharSequenceMgr {
     cookie.progressDialog.show();
 
     // run the query.
+    /// M: add projection ADN_ADDITIONAL_PHONE_NUMBER_COLUMN_NAME @ {
     handler.startQuery(
         ADN_QUERY_TOKEN,
         cookie,
         uri,
-        new String[] {ADN_PHONE_NUMBER_COLUMN_NAME},
+        new String[] {ADN_PHONE_NUMBER_COLUMN_NAME, ADN_ADDITIONAL_PHONE_NUMBER_COLUMN_NAME},
         null,
         null,
         null);
+    /// @}
 
     if (sPreviousAdnQueryHandler != null) {
       // It is harmless to call cancel() even after the handler's gone.
@@ -296,19 +377,48 @@ public class SpecialCharSequenceMgr {
           (telephonyManager.getPhoneType() == TelephonyManager.PHONE_TYPE_GSM)
               ? R.string.imei
               : R.string.meid;
+      /// M: As CTS requirement, TelephonyManager.getDeviceId() will always return IMEI
+      /// in LTE on CDMA device. @{
+      if (telephonyManager.getPhoneType() == TelephonyManager.PHONE_TYPE_CDMA
+          && telephonyManager.getLteOnCdmaMode() == PhoneConstants.LTE_ON_CDMA_TRUE) {
+        labelResId = R.string.imei;
+      }
+      /// @}
 
       List<String> deviceIds = new ArrayList<String>();
-      if (TelephonyManagerCompat.getPhoneCount(telephonyManager) > 1) {
-        for (int slot = 0; slot < telephonyManager.getPhoneCount(); slot++) {
-          String deviceId = telephonyManager.getDeviceId(slot);
+      try {
+        if (TelephonyManagerCompat.getPhoneCount(telephonyManager) > 1) {
+          for (int slot = 0; slot < telephonyManager.getPhoneCount(); slot++) {
+            String deviceId = telephonyManager.getDeviceId(slot);
+            if (!TextUtils.isEmpty(deviceId)) {
+              deviceIds.add(deviceId);
+            }
+          }
+        } else {
+          /// M: unify the API for same permission check rule and
+          /// for single SIM project there is only slot 0
+          String deviceId = telephonyManager.getDeviceId(0);
+          /// M: Avoid null object be added
           if (!TextUtils.isEmpty(deviceId)) {
-            deviceIds.add(deviceId);
+              deviceIds.add(deviceId);
           }
         }
-      } else {
-        deviceIds.add(telephonyManager.getDeviceId());
-      }
 
+        /// M: Add single IMEI plugin. @{
+        deviceIds = ExtensionManager.getDialPadExtension().getSingleIMEI(
+                deviceIds);
+        /// @}
+
+        /// M: Add single IMEI and MEID handle for OP01 OM project. @{
+        if (DialerFeatureOptions.isOpLightCustSupport()) {
+          deviceIds = handleOpIMEIs(deviceIds);
+        }
+        /// @}
+      } catch (SecurityException e) {
+        /// M: Catch the security exception to avoid dialer crash, such as user denied
+        /// READ_PHONE_STATE permission in settings at N version. And display empty list.
+        Toast.makeText(context, R.string.missing_required_permission, Toast.LENGTH_SHORT).show();
+      }
       new AlertDialog.Builder(context)
           .setTitle(labelResId)
           .setItems(deviceIds.toArray(new String[deviceIds.size()]), null)
@@ -352,7 +462,17 @@ public class SpecialCharSequenceMgr {
     @Override
     public void onPhoneAccountSelected(
         PhoneAccountHandle selectedAccountHandle, boolean setDefault, @Nullable String callId) {
-      Uri uri = TelecomUtil.getAdnUriForPhoneAccount(mContext, selectedAccountHandle);
+      /**
+       * original code:
+       * Uri uri = TelecomUtil.getAdnUriForPhoneAccount(mContext, selectedAccountHandle);
+       */
+      /// M: to support CDMA ADN query, uri should change to PBR if CDMA sim @{
+      final TelecomManager telecomManager =
+              (TelecomManager) mContext.getSystemService(Context.TELECOM_SERVICE);
+      int subId = TelephonyManager.getDefault().getSubIdForPhoneAccount(
+              telecomManager.getPhoneAccount(selectedAccountHandle));
+      Uri uri = SubInfoUtils.getIccProviderUri(subId);
+      /// @}
       handleAdnQuery(mQueryHandler, mCookie, uri);
       // TODO: Show error dialog if result isn't valid.
     }
@@ -416,6 +536,8 @@ public class SpecialCharSequenceMgr {
      */
     @Override
     public synchronized void onCancel(DialogInterface dialog) {
+      /** M: Fix CR ALPS01863413. Call QueryHandler.cancel(). @{ */
+      /** original code:
       // close the progress dialog
       if (progressDialog != null) {
         progressDialog.dismiss();
@@ -427,6 +549,9 @@ public class SpecialCharSequenceMgr {
 
       // Cancel the operation if possible.
       mHandler.cancelOperation(mToken);
+            */
+      mHandler.cancel();
+      /** @} */
     }
   }
 
@@ -438,9 +563,12 @@ public class SpecialCharSequenceMgr {
   private static class QueryHandler extends NoNullCursorAsyncQueryHandler {
 
     private boolean mCanceled;
+    /// M: own activity
+    private Activity mActivity;
 
-    public QueryHandler(ContentResolver cr) {
+    public QueryHandler(ContentResolver cr, Activity activity) {
       super(cr);
+      mActivity = activity;
     }
 
     /** Override basic onQueryComplete to fill in the textfield when we're handed the ADN cursor. */
@@ -448,8 +576,13 @@ public class SpecialCharSequenceMgr {
     protected void onNotNullableQueryComplete(int token, Object cookie, Cursor c) {
       try {
         sPreviousAdnQueryHandler = null;
-        if (mCanceled) {
-          return;
+        /// M: Fix CR ALPS01863413. Clear the ADN query cookie.
+        sSimContactQueryCookie = null;
+
+        /// M: add activity check to avoid JE error
+        if (mCanceled || mActivity == null ||
+                mActivity.isFinishing() || mActivity.isDestroyed()) {
+            return;
         }
 
         SimContactQueryCookie sc = (SimContactQueryCookie) cookie;
@@ -463,20 +596,53 @@ public class SpecialCharSequenceMgr {
         // if the TextView is valid, and the cursor is valid and positionable on the
         // Nth number, then we update the text field and display a toast indicating the
         // caller name.
-        if ((c != null) && (text != null) && (c.moveToPosition(sc.contactNum))) {
-          String name = c.getString(c.getColumnIndexOrThrow(ADN_NAME_COLUMN_NAME));
-          String number = c.getString(c.getColumnIndexOrThrow(ADN_PHONE_NUMBER_COLUMN_NAME));
+        /// M: [ALPS01764940]Add index to indicate the queried contacts @{
+        String name = null;
+        String number = null;
+        String additionalNumber = null;
+
+        if ((c != null) && (text != null)) {
+          int adnIdIndex = c.getColumnIndex(ADN_ID_COLUMN_NAME);
+          if (adnIdIndex == -1) {
+            ///M:[portable] means can not find ADN_ID_COLUMN_NAME, use original logic.
+            LogUtil.v(TAG, "onNotNullableQueryComplete, use original logic to get adn.");
+            if (c.moveToPosition(sc.contactNum)) {
+              name = c.getString(c.getColumnIndexOrThrow(ADN_NAME_COLUMN_NAME));
+              number = c.getString(c.getColumnIndexOrThrow(ADN_PHONE_NUMBER_COLUMN_NAME));
+            }
+          } else {
+            while (c.moveToNext()) {
+              if (c.getInt(adnIdIndex) == sc.contactNum) {
+                name = c.getString(c.getColumnIndexOrThrow(ADN_NAME_COLUMN_NAME));
+                number = c.getString(c.getColumnIndexOrThrow(ADN_PHONE_NUMBER_COLUMN_NAME));
+                additionalNumber = c.getString(c
+                    .getColumnIndexOrThrow(ADN_ADDITIONAL_PHONE_NUMBER_COLUMN_NAME));
+                break;
+              }
+            }
+          }
 
           // fill the text in.
-          text.getText().replace(0, 0, number);
+          if (!TextUtils.isEmpty(number)) {
+            text.getText().replace(0, 0, number);
+          } else if (!TextUtils.isEmpty(additionalNumber)) {
+            text.getText().replace(0, 0, additionalNumber);
+          }
 
           // display the name as a toast
-          Context context = sc.progressDialog.getContext();
-          CharSequence msg =
-              ContactDisplayUtils.getTtsSpannedPhoneNumber(
-                  context.getResources(), R.string.menu_callNumber, name);
-          Toast.makeText(context, msg, Toast.LENGTH_SHORT).show();
+          /// M: empty name will cause ANR when calling getTtsSpannedPhoneNumber()
+          LogUtil.d(
+              TAG,
+              "onNotNullableQueryComplete, name : " + name + " number : "
+                  + LogUtil.sanitizePii(number));
+          if (!TextUtils.isEmpty(name)) {
+            Context context = sc.progressDialog.getContext();
+            CharSequence msg = ContactDisplayUtils.getTtsSpannedPhoneNumber(context.getResources(),
+                R.string.menu_callNumber, name);
+            Toast.makeText(context, msg, Toast.LENGTH_SHORT).show();
+          }
         }
+        /// @}
       } finally {
         MoreCloseables.closeQuietly(c);
       }
@@ -487,6 +653,89 @@ public class SpecialCharSequenceMgr {
       // Ask AsyncQueryHandler to cancel the whole request. This will fail when the query is
       // already started.
       cancelOperation(ADN_QUERY_TOKEN);
+        /// M: Fix CR ALPS01863413. Dismiss the progress and clear the ADN query cookie. @{
+      if (sSimContactQueryCookie != null && sSimContactQueryCookie.progressDialog != null) {
+        sSimContactQueryCookie.progressDialog.dismiss();
+        sSimContactQueryCookie = null;
+      }
+        /// @}
     }
+  }
+
+  /** M: Fix CR ALPS01863413. Make the progress dismiss after the ADN query be cancelled.
+   *  And make it support screen rotation while phone account pick dialog shown. @{ */
+  private static SimContactQueryCookie sSimContactQueryCookie;
+
+  /**
+   * For ADN query with multiple phone accounts. If the the phone account pick
+   * dialog shown, then rotate the screen and select one account to query ADN.
+   * The ADN result would write into the old text view because the views
+   * re-created but the class did not known. So, the dialpad fragment should
+   * call this method to update the digits text filed view after it be
+   * re-created.
+   *
+   * @param textFiled
+   *            the digits text filed view
+   */
+  public static void updateTextFieldView(EditText textFiled) {
+    if (sSimContactQueryCookie != null) {
+      sSimContactQueryCookie.setTextField(textFiled);
+    }
+  }
+  /** @} */
+
+  /// M: for OP01 OM 6M project @{
+  /**
+   * handle IMEI display about MEID and IMEI.
+   * @param List <String> list, the IMEI string list.
+   * @return List<String>, the IMEI string list handled.
+   */
+  private static List<String> handleOpIMEIs(List<String> list) {
+    int phoneCount = TelephonyManager.getDefault().getPhoneCount();
+    String meid = "";
+    list.clear();
+    for (int i = 0; i < phoneCount; i++) {
+      String imei = TelephonyManager.getDefault().getImei(i);
+      LogUtil.d(TAG, "handleOpIMEIs, imei = " + LogUtil.sanitizePii(imei));
+      list.add("IMEI:" + imei);
+      if (TextUtils.isEmpty(meid)) {
+          meid = TelephonyManager.getDefault().getMeid(i);
+      }
+    }
+    meid = "MEID:" + meid;
+    list.add(meid);
+    return list;
+  }
+  /// @}
+
+  /** M: Handle reboot meta secret code, if match,reboot the device and set the meta boot type
+   * SystemProperties to usb or wifi mode according to the input.
+   * @param context the context to use
+   * @param input the secret code
+   * @return true if secret code matched
+   */
+  private static boolean handleRebootMetaSecretCode(Context context, String input) {
+    PowerManager powerManager = (PowerManager) context.getSystemService(Context.POWER_SERVICE);
+    if (powerManager != null
+        && (MMI_USB_REBOOT_META_SECRET_CODE.equals(input) || MMI_WIFI_REBOOT_META_SECRET_CODE
+            .equals(input))) {
+      if (MMI_USB_REBOOT_META_SECRET_CODE.equals(input)) {
+        powerManager.reboot(PowerManagerCompat.REBOOT_META_USB);
+      } else {
+        powerManager.reboot(PowerManagerCompat.REBOOT_META_WIFI);
+      }
+      return true;
+    }
+    return false;
+  }
+  /// @}
+
+  /**M:Read flag for ATM
+   *@return flag
+   */
+  private static String readATMFlag() {
+    String atm_flag = SystemProperties.get(ATM_FLAG_PROP);
+    LogUtil.d(TAG,"readATMFlag value: "+atm_flag);
+    return atm_flag;
   }
 }

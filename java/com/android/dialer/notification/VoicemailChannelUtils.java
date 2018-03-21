@@ -160,8 +160,16 @@ import java.util.Set;
       @NonNull Context context, @NonNull PhoneAccountHandle handle) {
     PhoneAccount phoneAccount =
         context.getSystemService(TelecomManager.class).getPhoneAccount(handle);
-    NotificationChannel channel =
-        newChannel(context, getChannelIdForAccount(handle), phoneAccount.getLabel());
+    /// M: fix NPE: 3608264 @{
+    NotificationChannel channel;
+    if (phoneAccount == null) {
+        channel =
+                newChannel(context, getChannelIdForAccount(handle), null);
+    } else {
+    /// @}
+        channel =
+                newChannel(context, getChannelIdForAccount(handle), phoneAccount.getLabel());
+    }
     migrateVoicemailSoundSettings(context, channel, handle);
     context.getSystemService(NotificationManager.class).createNotificationChannel(channel);
   }
@@ -193,7 +201,7 @@ import java.util.Set;
   private static NotificationChannel newChannel(
       @NonNull Context context, @NonNull String channelId, @Nullable CharSequence nameSuffix) {
     CharSequence name = context.getText(R.string.notification_channel_voicemail);
-    // TODO: Use a string resource template after v10.
+    // TODO(sail): Use a string resource template after v10.
     if (!TextUtils.isEmpty(nameSuffix)) {
       name = TextUtils.concat(name, ": ", nameSuffix);
     }

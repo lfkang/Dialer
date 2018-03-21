@@ -16,6 +16,8 @@
 
 package com.android.incallui;
 
+import android.content.Context;
+
 import com.android.incallui.ConferenceManagerPresenter.ConferenceManagerUi;
 import com.android.incallui.InCallPresenter.InCallDetailsListener;
 import com.android.incallui.InCallPresenter.InCallState;
@@ -25,6 +27,9 @@ import com.android.incallui.baseui.Presenter;
 import com.android.incallui.baseui.Ui;
 import com.android.incallui.call.CallList;
 import com.android.incallui.call.DialerCall;
+import com.mediatek.incallui.volte.AddMemberScreenController;
+import com.mediatek.incallui.volte.InCallUIVolteUtils;
+
 import java.util.ArrayList;
 import java.util.List;
 
@@ -39,6 +44,10 @@ public class ConferenceManagerPresenter extends Presenter<ConferenceManagerUi>
     // register for call state changes last
     InCallPresenter.getInstance().addListener(this);
     InCallPresenter.getInstance().addIncomingCallListener(this);
+    /// M: Init presenter right before register listeners @{
+    mContext = ((ConferenceManagerFragment) ui).getActivity();
+    init(CallList.getInstance());
+    /// @}
   }
 
   @Override
@@ -47,6 +56,9 @@ public class ConferenceManagerPresenter extends Presenter<ConferenceManagerUi>
 
     InCallPresenter.getInstance().removeListener(this);
     InCallPresenter.getInstance().removeIncomingCallListener(this);
+    /// M: for volte @{
+    AddMemberScreenController.getInstance().dismissAddMemberDialog();
+    /// @}
   }
 
   @Override
@@ -60,10 +72,16 @@ public class ConferenceManagerPresenter extends Presenter<ConferenceManagerUi>
               this, "Number of existing calls is " + String.valueOf(call.getChildCallIds().size()));
           update(callList);
         } else {
+          /// M: ALPS03598801, dismissAddMemberDialog in ConferenceManagerPresenter when the call is not
+          // a conference call any more. @{
+          AddMemberScreenController.getInstance().dismissAddMemberDialog();
+          /// @}
           InCallPresenter.getInstance().showConferenceCallManager(false);
         }
       } else {
-        InCallPresenter.getInstance().showConferenceCallManager(false);
+        /// M: ALPS03446063, for one-key conference @{
+        //InCallPresenter.getInstance().showConferenceCallManager(false);
+        /// @}
       }
     }
   }
@@ -106,6 +124,12 @@ public class ConferenceManagerPresenter extends Presenter<ConferenceManagerUi>
    * @param callList The callList.
    */
   private void update(CallList callList) {
+    /// M: Added for Volte conference. @{
+    if (InCallUIVolteUtils.isVolteSupport()) {
+        Log.d(this, "update()... on VoLTE support platform, update add member button.");
+        updateAddMemberButtonForVolte();
+    }
+    /// @}
     // callList is non null, but getActiveOrBackgroundCall() may return null
     final DialerCall currentCall = callList.getActiveOrBackgroundCall();
     if (currentCall == null) {
@@ -135,5 +159,46 @@ public class ConferenceManagerPresenter extends Presenter<ConferenceManagerUi>
     void update(List<DialerCall> participants, boolean parentCanSeparate);
 
     void refreshCall(DialerCall call);
+
+    /// M: for volte @{
+    void showAddMemberButton(boolean visible);
+    /// @}
   }
+
+  //---------------------------------------Mediatek------------------------------------------
+  private Context mContext;
+  /**
+   * M: show "dialog" of add member, which is a activity actually.
+   * For InCallActivity is singleInstance, can't use startActivityForResult() to select people
+   * from contacts,
+   * so here use a new activity to do the job.
+   */
+  public void showAddMemberScreen() {
+      if (mContext != null) {
+          AddMemberScreenController.getInstance().showAddMemberDialog(mContext);
+      } else {
+          Log.d(this, "Can not show AddMemberScreen, need check!");
+      }
+  }
+
+  /**
+   * M: Update add member button for volte conference.
+   * @param currentCall
+   */
+  private void updateAddMemberButtonForVolte() {
+      final DialerCall currentCall = CallList.getInstance().getActiveOrBackgroundCall();
+      if (currentCall == null) {
+          return;
+      }
+
+      if (currentCall != null && currentCall.isConferenceCall()) {
+          boolean addMemberVisibility = currentCall
+                  .can(mediatek.telecom.MtkCall.MtkDetails.MTK_CAPABILITY_INVITE_PARTICIPANTS);
+          Log.d(this, "updateAddMemberButtonForVolte() should show add member button : "
+                  + addMemberVisibility);
+          getUi().showAddMemberButton(addMemberVisibility);
+          AddMemberScreenController.getInstance().updateConferenceCallId(currentCall.getId());
+      }
+  }
+  /// @}
 }

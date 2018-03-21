@@ -16,6 +16,9 @@
 
 package com.android.incallui.hold;
 
+import java.util.Locale;
+
+import android.content.res.Resources;
 import android.os.Bundle;
 import android.support.annotation.NonNull;
 import android.support.annotation.Nullable;
@@ -23,6 +26,7 @@ import android.support.v4.app.Fragment;
 import android.telephony.PhoneNumberUtils;
 import android.text.BidiFormatter;
 import android.text.TextDirectionHeuristics;
+import android.text.TextUtils;
 import android.transition.TransitionManager;
 import android.view.LayoutInflater;
 import android.view.View;
@@ -32,6 +36,7 @@ import android.widget.ImageView;
 import android.widget.TextView;
 import com.android.dialer.common.Assert;
 import com.android.incallui.incall.protocol.SecondaryInfo;
+import com.mediatek.incallui.plugin.ExtensionManager;
 
 /** Shows banner UI for background call */
 public class OnHoldFragment extends Fragment {
@@ -69,6 +74,21 @@ public class OnHoldFragment extends Fragment {
             secondaryInfo.isVideoCall
                 ? R.drawable.quantum_ic_videocam_white_18
                 : R.drawable.quantum_ic_call_white_18);
+
+    /// M: show SIM infor for hold call. @{
+    TextView providerName = (TextView) view.findViewById(R.id.call_provider_name);
+    if (!TextUtils.isEmpty(secondaryInfo.providerLabel)) {
+      providerName.setText(
+              PhoneNumberUtils.createTtsSpannable(
+                BidiFormatter.getInstance()
+                    .unicodeWrap(secondaryInfo.providerLabel, TextDirectionHeuristics.LTR)));
+      /// show account color too.
+      providerName.setTextColor(secondaryInfo.color);
+    } else {
+      providerName.setVisibility(View.GONE);
+    }
+    /// @}
+
     view.addOnAttachStateChangeListener(
         new OnAttachStateChangeListener() {
           @Override
@@ -80,6 +100,19 @@ public class OnHoldFragment extends Fragment {
           @Override
           public void onViewDetachedFromWindow(View v) {}
         });
+
+    /// M: CTA cutome Hold string. @{
+    int ctaRes = getCtaSpecificOnHoldResId(view.getResources());
+    if (ctaRes > 0) {
+      TextView secondaryCallStatus = (TextView) view
+          .findViewById(R.id.secondary_call_status);
+      secondaryCallStatus.setText(view.getResources().getString(ctaRes));
+    }
+    /// @}
+
+    /// M: add for OP09 plugin. @{
+    ExtensionManager.getCallCardExt().onHoldViewCreated(view);
+    /// @}
     return view;
   }
 
@@ -98,5 +131,19 @@ public class OnHoldFragment extends Fragment {
       TransitionManager.beginDelayedTransition(((ViewGroup) getView().getParent()));
       getView().setPadding(0, newPadding, 0, 0);
     }
+  }
+
+  /**
+   * M: [CTA]CTA required that in Simplified Chinese, the text label of the secondary/tertiary
+   * call should be changed to another string rather than google default.
+   * @return the right resId CTS required.
+   */
+  private int getCtaSpecificOnHoldResId(Resources res) {
+      Locale currentLocale = res.getConfiguration().locale;
+      if (Locale.SIMPLIFIED_CHINESE.getCountry().equals(currentLocale.getCountry())
+              && Locale.SIMPLIFIED_CHINESE.getLanguage().equals(currentLocale.getLanguage())) {
+          return R.string.onHold_cta;
+      }
+      return -1;
   }
 }

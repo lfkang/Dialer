@@ -20,12 +20,14 @@ import android.os.Bundle;
 import android.support.v4.app.Fragment;
 import android.support.v7.app.AppCompatActivity;
 import android.view.MenuItem;
+import com.android.incallui.Log;
+
 
 /** Shows the {@link ConferenceManagerFragment} */
 public class ManageConferenceActivity extends AppCompatActivity {
 
   private boolean isVisible;
-
+  private static final String TAG = "ManageConferenceActivity";
   public boolean isVisible() {
     return isVisible;
   }
@@ -82,5 +84,16 @@ public class ManageConferenceActivity extends AppCompatActivity {
   protected void onStop() {
     super.onStop();
     isVisible = false;
+  }
+
+ /**
+   * M: override finish fuction that clear task when do finish.
+   * to fix ALPS03657512 and ALPS03693586.the rootcause is ContactSelectionActivity don't destory
+   * when manageConferenceActivity destory.clear task will destory ContactSelectionActivity.
+   */
+  @Override
+  public void finish() {
+      Log.d(TAG, "finish and clear task");
+      super.finishAndRemoveTask();
   }
 }

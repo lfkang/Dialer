@@ -33,7 +33,13 @@ import java.lang.annotation.RetentionPolicy;
   SessionModificationState.UPGRADE_TO_VIDEO_REQUEST_TIMED_OUT,
   SessionModificationState.UPGRADE_TO_VIDEO_REQUEST_FAILED,
   SessionModificationState.REQUEST_REJECTED,
-  SessionModificationState.WAITING_FOR_RESPONSE
+  SessionModificationState.WAITING_FOR_RESPONSE,
+  /// M: Cancel upgrade @{
+  SessionModificationState.WAITING_FOR_CANCEL_UPGRADE_RESPONSE,
+  SessionModificationState.RCANCEL_UPGRADE_FAIL_AUTO_DOWNGRADE,
+  SessionModificationState.CANCEL_UPGRADE_FAIL,
+  SessionModificationState.CANCEL_UPGRADE_FAIL_REMOTE_REJECT_UPGRADE
+  ///@}
 })
 public @interface SessionModificationState {
   int NO_REQUEST = 0;
@@ -44,4 +50,10 @@ public @interface SessionModificationState {
   int UPGRADE_TO_VIDEO_REQUEST_FAILED = 5;
   int REQUEST_REJECTED = 6;
   int WAITING_FOR_RESPONSE = 7;
+  /// M: Cancel upgrade @{
+  int WAITING_FOR_CANCEL_UPGRADE_RESPONSE=8;
+  int RCANCEL_UPGRADE_FAIL_AUTO_DOWNGRADE = 9;
+  int CANCEL_UPGRADE_FAIL = 10;
+  int CANCEL_UPGRADE_FAIL_REMOTE_REJECT_UPGRADE = 11;
+  ///@}
 }

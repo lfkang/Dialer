@@ -31,17 +31,30 @@
     android:layout_alignParentBottom="true"
     android:layout_alignParentStart="true"
     android:visibility="invisible"/>
-
+  <!-- M: add scroll view to add mediatek new features. @{ -->
+  <ScrollView
+      android:id="@+id/videocall_video_controls_scrollview"
+      android:layout_width="wrap_content"
+      android:layout_height="wrap_content"
+      android:layout_below="@+id/incall_contact_grid"
+      android:gravity="center_horizontal"
+      android:layout_above="@+id/videocall_video_preview_placeholder"
+      android:layout_alignEnd="@+id/videocall_video_preview_placeholder"
+      android:layout_alignStart="@+id/videocall_video_preview_placeholder"
+      android:fadeScrollbars="false"
+      android:verticalScrollbarPosition="left"
+      android:scrollbarStyle="outsideOverlay"
+      android:scrollIndicators="bottom|top"
+      android:visibility="visible"
+      android:layout_marginBottom="12dp">
+  <!-- @} -->
   <LinearLayout
     android:id="@+id/videocall_video_controls"
     android:layout_width="wrap_content"
     android:layout_height="wrap_content"
-    android:layout_above="@+id/videocall_video_preview_placeholder"
-    android:layout_alignEnd="@+id/videocall_video_preview_placeholder"
-    android:layout_alignStart="@+id/videocall_video_preview_placeholder"
-    android:gravity="center_horizontal"
     android:orientation="vertical"
     android:visibility="invisible"
+    android:layout_marginBottom="@dimen/videocall_button_spacing"
     tools:visibility="visible">
     <com.android.incallui.video.impl.CheckableImageButton
       android:id="@+id/videocall_speaker_button"
@@ -79,7 +92,97 @@
       android:layout_width="@dimen/videocall_button_size"
       android:layout_height="@dimen/videocall_button_size"
       android:layout_marginBottom="@dimen/videocall_button_spacing"/>
+
+  <!-- M: add mediatek new features. @{ -->
+    <ImageButton
+      android:id="@+id/videocall_downgrade_audio"
+      style="@style/Incall.Button.VideoCall"
+      android:layout_width="@dimen/videocall_button_size"
+      android:layout_height="@dimen/videocall_button_size"
+      android:src="@drawable/mtk_ic_downgrade_audio"
+      android:layout_marginBottom="@dimen/videocall_button_spacing"
+      />
+    <com.android.incallui.video.impl.CheckableImageButton
+      android:id="@+id/hide_preview"
+      style="@style/Incall.Button.VideoCall"
+      android:layout_width="@dimen/videocall_button_size"
+      android:layout_height="@dimen/videocall_button_size"
+      android:layout_marginBottom="@dimen/videocall_button_spacing"
+      android:src="@drawable/mtk_ic_hidepreview"
+      app:contentDescriptionChecked="@string/hideVideoPreview"
+      app:contentDescriptionUnchecked="@string/showVideoPreview"
+      />
+     <ImageButton
+       android:id="@+id/cancel_upgrade"
+       style="@style/Incall.Button.VideoCall"
+       android:layout_width="@dimen/videocall_button_size"
+       android:layout_height="@dimen/videocall_button_size"
+       android:src="@drawable/mtk_ic_cancelupgrade"
+       android:layout_marginBottom="@dimen/videocall_button_spacing"
+       />
+     <ImageButton
+      android:id="@+id/add_call"
+      style="@style/Incall.Button.VideoCall"
+      android:layout_width="@dimen/videocall_button_size"
+      android:layout_height="@dimen/videocall_button_size"
+      android:src="@drawable/ic_addcall_white"
+      android:layout_marginBottom="@dimen/videocall_button_spacing"
+      />
+      <ImageButton
+      android:id="@+id/merge_call"
+      style="@style/Incall.Button.VideoCall"
+      android:layout_width="@dimen/videocall_button_size"
+      android:layout_height="@dimen/videocall_button_size"
+      android:src="@drawable/quantum_ic_call_merge_white_36"
+      android:layout_marginBottom="@dimen/videocall_button_spacing"
+      />
+     <ImageButton
+      android:id="@+id/manage_video_conference"
+      style="@style/Incall.Button.VideoCall"
+      android:layout_width="@dimen/videocall_button_size"
+      android:layout_height="@dimen/videocall_button_size"
+      android:src="@drawable/quantum_ic_group_white_36"
+      android:layout_marginBottom="@dimen/videocall_button_spacing"
+      />
+     <ImageButton
+      android:id="@+id/transfer_call"
+      style="@style/Incall.Button.VideoCall"
+      android:layout_width="@dimen/videocall_button_size"
+      android:layout_height="@dimen/videocall_button_size"
+      android:src="@drawable/mtk_ic_toolbar_transfer"
+      android:layout_marginBottom="@dimen/videocall_button_spacing"
+      />
+     <ImageButton
+      android:id="@+id/blind_transfer_call"
+      style="@style/Incall.Button.VideoCall"
+      android:layout_width="@dimen/videocall_button_size"
+      android:layout_height="@dimen/videocall_button_size"
+      android:src="@drawable/mtk_ic_toolbar_transfer"
+      android:layout_marginBottom="@dimen/videocall_button_spacing"
+      />
+     <com.android.incallui.video.impl.CheckableImageButton
+      android:id="@+id/video_dialpad"
+      style="@style/Incall.Button.VideoCall"
+      android:layout_width="@dimen/videocall_button_size"
+      android:layout_height="@dimen/videocall_button_size"
+      android:layout_marginBottom="@dimen/videocall_button_spacing"
+      android:src="@drawable/quantum_ic_dialpad_white_36"
+      app:contentDescriptionChecked="@string/incall_label_dialpad"
+      app:contentDescriptionUnchecked="@string/incall_label_dialpad"
+      />
+     <com.android.incallui.video.impl.CheckableImageButton
+      android:id="@+id/hold_call"
+      style="@style/Incall.Button.VideoCall"
+      android:layout_width="@dimen/videocall_button_size"
+      android:layout_height="@dimen/videocall_button_size"
+      android:layout_marginBottom="@dimen/videocall_button_spacing"
+      android:src="@drawable/quantum_ic_pause_white_36"
+      app:contentDescriptionChecked="@string/incall_content_description_hold"
+      app:contentDescriptionUnchecked="@string/incall_content_description_unhold"
+      />
   </LinearLayout>
+  </ScrollView>
+  <!-- @} -->
 
   <FrameLayout
     android:id="@+id/videocall_switch_controls"
@@ -101,6 +204,16 @@
       />
   </FrameLayout>
 
+  <!-- M: support dialerpad for video call. -->
+  <FrameLayout
+      android:id="@+id/incall_dialpad_container"
+      style="@style/DialpadContainer"
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:layout_alignParentBottom="true"
+      tools:background="@android:color/white"
+      tools:visibility="gone"/>
+  <!-- @} -->
   <ImageButton
     android:id="@+id/videocall_end_call"
     style="@style/Incall.Button.End"

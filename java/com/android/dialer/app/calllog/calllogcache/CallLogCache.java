@@ -19,6 +19,7 @@ package com.android.dialer.app.calllog.calllogcache;
 import android.content.Context;
 import android.support.annotation.Nullable;
 import android.telecom.PhoneAccountHandle;
+import android.telephony.PhoneNumberUtils;
 import android.text.TextUtils;
 import android.util.ArrayMap;
 import com.android.dialer.app.calllog.CallLogAdapter;
@@ -49,6 +50,8 @@ public class CallLogCache {
   private final Map<PhoneAccountHandle, String> mPhoneAccountLabelCache = new ArrayMap<>();
   private final Map<PhoneAccountHandle, Integer> mPhoneAccountColorCache = new ArrayMap<>();
   private final Map<PhoneAccountHandle, Boolean> mPhoneAccountCallWithNoteCache = new ArrayMap<>();
+  /// M: Cache voicemail numbers for each account, improve cache efficiency.
+  private final Map<PhoneAccountHandle, String> mPhoneAccountVoiceMailNumber = new ArrayMap<>();
 
   public CallLogCache(Context context) {
     mContext = context;
@@ -58,6 +61,7 @@ public class CallLogCache {
     mPhoneAccountLabelCache.clear();
     mPhoneAccountColorCache.clear();
     mPhoneAccountCallWithNoteCache.clear();
+    mPhoneAccountVoiceMailNumber.clear();
     mHasCheckedForVideoAvailability = false;
     mVideoAvailability = 0;
   }
@@ -66,12 +70,33 @@ public class CallLogCache {
    * Returns true if the given number is the number of the configured voicemail. To be able to
    * mock-out this, it is not a static method.
    */
-  public synchronized boolean isVoicemailNumber(
+  public /*synchronized*/  boolean isVoicemailNumber(
       PhoneAccountHandle accountHandle, @Nullable CharSequence number) {
     if (TextUtils.isEmpty(number)) {
       return false;
     }
-    return TelecomUtil.isVoicemailNumber(mContext, accountHandle, number.toString());
+
+    /// M: improve voice number lookup efficiency by caching all voice numbers, no need
+    /// binder call telecom for every number. @{
+    if (accountHandle == null) {
+        return false;
+    }
+    String voiceNumber = null;
+    if (mPhoneAccountVoiceMailNumber.containsKey(accountHandle)) {
+        voiceNumber = mPhoneAccountVoiceMailNumber.get(accountHandle);
+    } else {
+        synchronized(this) {
+            voiceNumber = TelecomUtil.getVoicemailNumber(mContext, accountHandle);
+             mPhoneAccountVoiceMailNumber.put(accountHandle, voiceNumber);
+        }
+    }
+    if (number.equals(voiceNumber)) {
+        return true;
+    }
+    return PhoneNumberUtils.compare(number.toString(), voiceNumber);
+    /// @}
+
+   // return TelecomUtil.isVoicemailNumber(mContext, accountHandle, number.toString());
   }
 
   /**

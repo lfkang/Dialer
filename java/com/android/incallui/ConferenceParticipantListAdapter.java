@@ -187,6 +187,13 @@ public class ConferenceParticipantListAdapter extends BaseAdapter {
       View view = mListView.getChildAt(position);
       String rowCallId = (String) view.getTag();
       if (rowCallId.equals(callId)) {
+        /// M: position leak JE. @{
+        if (position + first >= mConferenceParticipants.size()) {
+            Log.e(this, "refreshView call [" + callId
+                + "] failed, view's position [" + (position + first) + "] leak");
+            break;
+        }
+        /// @}
         getView(position + first, view, mListView);
         break;
       }
@@ -246,6 +253,10 @@ public class ConferenceParticipantListAdapter extends BaseAdapter {
         contactCache.displayPhotoUri,
         thisRowCanSeparate,
         thisRowCanDisconnect);
+
+    /// M: Added for Volte conference feature. @{
+    setCallStatusForVolte(result, call);
+    /// @}
 
     // Tag the row in the conference participant list with the call id to make it easier to
     // find calls when contact cache information is loaded.
@@ -369,6 +380,10 @@ public class ConferenceParticipantListAdapter extends BaseAdapter {
         ParticipantInfo participantInfo = new ParticipantInfo(call, contactCache);
         mConferenceParticipants.add(participantInfo);
         mParticipantsByCallId.put(call.getId(), participantInfo);
+        /// M: add log for mConferenceParticipants size exception.
+        Log.d(this, "updateParticipantInfo, add CallId: " + call.getId()
+            + " after added , size: " + mConferenceParticipants.size()
+            + " / " + mParticipantsByCallId.size());
       }
     }
 
@@ -381,6 +396,10 @@ public class ConferenceParticipantListAdapter extends BaseAdapter {
         ParticipantInfo existingInfo = entry.getValue();
         mConferenceParticipants.remove(existingInfo);
         it.remove();
+        /// M: add log for mConferenceParticipants size exception.
+        Log.d(this, "updateParticipantInfo, remove CallId: " + existingCallId
+            + " after removed , size: " + mConferenceParticipants.size()
+            + " / " + mParticipantsByCallId.size());
       }
     }
 
@@ -522,5 +541,24 @@ public class ConferenceParticipantListAdapter extends BaseAdapter {
     public int hashCode() {
       return mCall.getId().hashCode();
     }
+  }
+
+  /// M: -------------------------------------Mediatek--------------------------------------------
+  /**
+   * Set call status if needed.
+   * @param view
+   * @param call
+   */
+  public final void setCallStatusForVolte(View view, DialerCall call) {
+      boolean thisRowCanShowStatus = call.getTelecomCall().getDetails().hasProperty(
+          mediatek.telecom.MtkCall.MtkDetails.MTK_PROPERTY_VOLTE);
+      final TextView statusTextView = (TextView) view.findViewById(R.id.conferenceCallerStatus);
+
+      if (thisRowCanShowStatus) {
+          statusTextView.setVisibility(View.VISIBLE);
+          statusTextView.setText(call.getCallStatusFromState(getContext()));
+      } else {
+          statusTextView.setVisibility(View.GONE);
+      }
   }
 }

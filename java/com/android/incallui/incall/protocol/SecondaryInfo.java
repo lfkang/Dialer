@@ -31,9 +31,11 @@ public class SecondaryInfo implements Parcelable {
   public final boolean isConference;
   public final boolean isVideoCall;
   public final boolean isFullscreen;
+  /// M: CTA support sim color.
+  public final int color;
 
   public static SecondaryInfo createEmptySecondaryInfo(boolean isFullScreen) {
-    return new SecondaryInfo(false, null, false, null, null, false, false, isFullScreen);
+    return new SecondaryInfo(false, null, false, null, null, false, false, isFullScreen, 0);
   }
 
   public SecondaryInfo(
@@ -44,7 +46,9 @@ public class SecondaryInfo implements Parcelable {
       String providerLabel,
       boolean isConference,
       boolean isVideoCall,
-      boolean isFullscreen) {
+      boolean isFullscreen,
+      /// M: CTA support sim color.
+      int color) {
     this.shouldShow = shouldShow;
     this.name = name;
     this.nameIsNumber = nameIsNumber;
@@ -53,6 +57,8 @@ public class SecondaryInfo implements Parcelable {
     this.isConference = isConference;
     this.isVideoCall = isVideoCall;
     this.isFullscreen = isFullscreen;
+    /// M: CTA support sim color.
+    this.color = color;
   }
 
   @Override
@@ -75,6 +81,8 @@ public class SecondaryInfo implements Parcelable {
     isConference = in.readByte() != 0;
     isVideoCall = in.readByte() != 0;
     isFullscreen = in.readByte() != 0;
+    /// M: CTA support sim color.
+    color = in.readInt();
   }
 
   public static final Creator<SecondaryInfo> CREATOR =
@@ -105,5 +113,7 @@ public class SecondaryInfo implements Parcelable {
     dest.writeByte((byte) (isConference ? 1 : 0));
     dest.writeByte((byte) (isVideoCall ? 1 : 0));
     dest.writeByte((byte) (isFullscreen ? 1 : 0));
+    /// M: CTA support sim color.
+    dest.writeInt(color);
   }
 }

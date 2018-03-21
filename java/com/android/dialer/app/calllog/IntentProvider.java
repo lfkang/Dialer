@@ -32,6 +32,8 @@ import com.android.dialer.dialercontact.DialerContact;
 import com.android.dialer.lightbringer.LightbringerComponent;
 import com.android.dialer.util.CallUtil;
 import com.android.dialer.util.IntentUtil;
+import com.mediatek.dialer.compat.TelecomCompat;
+
 import java.util.ArrayList;
 
 /**
@@ -193,4 +195,50 @@ public abstract class IntentProvider {
   }
 
   public abstract Intent getIntent(Context context);
+
+  /**
+   * M: [VoLTE ConfCall] For Volte Conference Call.
+   * Get the IntentProvider which would return the volte conference call intent
+   * @param numbers the volte conference call numbers
+   * @return the IntentProvider
+   */
+  public static IntentProvider getReturnVolteConfCallIntentProvider(
+          final ArrayList<String> numbers) {
+    return new IntentProvider() {
+      @Override
+      public Intent getIntent(Context context) {
+        Intent confCallIntent = new CallIntentBuilder(numbers.get(0),
+            CallInitiationType.Type.CALL_LOG).build();
+        confCallIntent.putExtra(TelecomCompat.EXTRA_VOLTE_CONF_CALL_DIAL,
+            true);
+        confCallIntent.putStringArrayListExtra(
+            TelecomCompat.EXTRA_VOLTE_CONF_CALL_NUMBERS, numbers);
+        return confCallIntent;
+      }
+    };
+  }
+  /** @} */
+
+  /**
+   * M: [VoLTE ConfCallLog] For volte Conference callLog
+   * Retrieves the call details intent provider for an entry in the call log.
+   *
+   * @param id The call ID of the first call in the call group.
+   * @param extraIds The call ID of the other calls grouped together with the call.
+   * @param voicemailUri If call log entry is for a voicemail, the voicemail URI.
+   * @param isConferenceCall if it was conference call
+   * @return The call details intent provider.
+   */
+  public static IntentProvider getCallDetailIntentProvider(
+      CallDetailsEntries callDetailsEntries,
+      DialerContact contact, boolean canReportCallerId,
+      final boolean isConferenceCall, final boolean isConfChildDetail) {
+    return new IntentProvider() {
+      @Override
+      public Intent getIntent(Context context) {
+        return CallDetailsActivity.newInstance(context, callDetailsEntries, contact, false,
+            isConferenceCall, isConfChildDetail);
+      }
+    };
+  }
 }

@@ -19,6 +19,7 @@ package com.android.incallui.incall.impl;
 import android.Manifest.permission;
 import android.content.Context;
 import android.content.pm.PackageManager;
+import android.graphics.drawable.AnimationDrawable;
 import android.os.Build.VERSION;
 import android.os.Build.VERSION_CODES;
 import android.os.Bundle;
@@ -45,8 +46,12 @@ import com.android.dialer.logging.DialerImpression;
 import com.android.dialer.logging.Logger;
 import com.android.dialer.multimedia.MultimediaData;
 import com.android.dialer.widget.LockableViewPager;
+import com.android.incallui.InCallPresenter;
+import com.android.incallui.Log;
 import com.android.incallui.audioroute.AudioRouteSelectorDialogFragment;
 import com.android.incallui.audioroute.AudioRouteSelectorDialogFragment.AudioRouteSelectorPresenter;
+import com.android.incallui.call.CallList;
+import com.android.incallui.call.DialerCall;
 import com.android.incallui.contactgrid.ContactGridManager;
 import com.android.incallui.hold.OnHoldFragment;
 import com.android.incallui.incall.impl.ButtonController.SpeakerButtonController;
@@ -62,6 +67,7 @@ import com.android.incallui.incall.protocol.InCallScreenDelegateFactory;
 import com.android.incallui.incall.protocol.PrimaryCallState;
 import com.android.incallui.incall.protocol.PrimaryInfo;
 import com.android.incallui.incall.protocol.SecondaryInfo;
+
 import java.util.ArrayList;
 import java.util.List;
 
@@ -108,7 +114,16 @@ public class InCallFragment extends Fragment
         || id == InCallButtonIds.BUTTON_UPGRADE_TO_VIDEO
         || id == InCallButtonIds.BUTTON_ADD_CALL
         || id == InCallButtonIds.BUTTON_MERGE
-        || id == InCallButtonIds.BUTTON_MANAGE_VOICE_CONFERENCE;
+        || id == InCallButtonIds.BUTTON_MANAGE_VOICE_CONFERENCE
+        /// M: [Voice Record]
+        || id == InCallButtonIds.BUTTON_SWITCH_VOICE_RECORD
+        /// M: [Hang Up]
+        || id == InCallButtonIds.BUTTON_HANG_UP_ALL
+        || id == InCallButtonIds.BUTTON_HANG_UP_HOLD
+        /// M: [ECT(blind)]
+        || id == InCallButtonIds.BUTTON_ECT
+        || id == InCallButtonIds.BUTTON_BLIND_ECT
+        || id == InCallButtonIds.BUTTON_DEVICE_SWITCH;
   }
 
   @Override
@@ -182,6 +197,9 @@ public class InCallFragment extends Fragment
   public void onViewCreated(@NonNull View view, @Nullable Bundle bundle) {
     LogUtil.i("InCallFragment.onViewCreated", null);
     super.onViewCreated(view, bundle);
+    /// M: [Voice Record] Add for recording. @{
+    initVoiceRecorderIcon(view);
+    /// @}
     inCallScreenDelegate =
         FragmentUtils.getParent(this, InCallScreenDelegateFactory.class).newInCallScreenDelegate();
     Assert.isNotNull(inCallScreenDelegate);
@@ -195,10 +213,30 @@ public class InCallFragment extends Fragment
     buttonControllers.add(new ButtonController.MergeButtonController(inCallButtonUiDelegate));
     buttonControllers.add(
         new ButtonController.UpgradeToVideoButtonController(inCallButtonUiDelegate));
+    /// M: [Voice Record] @{
+    buttonControllers.add(
+            new ButtonController.SwitchVoiceRecordButtonController(inCallButtonUiDelegate));
+    /// @}
+    /// M: [ECT(blind)] @{
+    buttonControllers.add(
+            new ButtonController.ECTButtonController(inCallButtonUiDelegate));
+    buttonControllers.add(
+            new ButtonController.BlindECTButtonController(inCallButtonUiDelegate));
+    /// @}
+    /// M: [Hang Up] @{
+    buttonControllers.add(
+            new ButtonController.HangupAllButtonController(inCallScreenDelegate));
+    buttonControllers.add(
+            new ButtonController.HangupHoldButtonController(inCallScreenDelegate));
+    /// @}
     buttonControllers.add(
         new ButtonController.ManageConferenceButtonController(inCallScreenDelegate));
     buttonControllers.add(
         new ButtonController.SwitchToSecondaryButtonController(inCallScreenDelegate));
+  /// M: [Device Switch] @{
+    buttonControllers.add(
+            new ButtonController.DeviceSwitchButtonController(inCallButtonUiDelegate));
+    /// @}
 
     inCallScreenDelegate.onInCallScreenDelegateInit(this);
     inCallScreenDelegate.onInCallScreenReady();
@@ -235,7 +273,7 @@ public class InCallFragment extends Fragment
 
   @Override
   public void setPrimary(@NonNull PrimaryInfo primaryInfo) {
-    LogUtil.i("InCallFragment.setPrimary", primaryInfo.toString());
+    LogUtil.d("InCallFragment.setPrimary", primaryInfo.toString());
     setAdapterMedia(primaryInfo.multimediaData);
     contactGridManager.setPrimary(primaryInfo);
 
@@ -286,12 +324,26 @@ public class InCallFragment extends Fragment
 
   @Override
   public void setSecondary(@NonNull SecondaryInfo secondaryInfo) {
-    LogUtil.i("InCallFragment.setSecondary", secondaryInfo.toString());
-    getButtonController(InCallButtonIds.BUTTON_SWITCH_TO_SECONDARY)
-        .setEnabled(secondaryInfo.shouldShow);
-    getButtonController(InCallButtonIds.BUTTON_SWITCH_TO_SECONDARY)
-        .setAllowed(secondaryInfo.shouldShow);
-    updateButtonStates();
+    LogUtil.d("InCallFragment.setSecondary", secondaryInfo.toString());
+    /// M: Need inset secondary view after sim account dialog show @{
+    if (mNeedInsetSecondaryView) {
+      getActivity().getWindow().getDecorView().requestApplyInsets();
+      mNeedInsetSecondaryView = false;
+      LogUtil.i("InCallFragment.setSecondary", "requestApplyInsets");
+    }
+    /// @}
+    /// M: Enable switch to secondary button when primary call active @{
+    if (secondaryInfo.shouldShow) {
+      mNeedSetSecondaryButton = true;
+    } else {
+      mNeedSetSecondaryButton = false;
+      getButtonController(InCallButtonIds.BUTTON_SWITCH_TO_SECONDARY)
+          .setEnabled(secondaryInfo.shouldShow);
+      getButtonController(InCallButtonIds.BUTTON_SWITCH_TO_SECONDARY)
+          .setAllowed(secondaryInfo.shouldShow);
+      updateButtonStates();
+    }
+    /// @}
 
     if (!isAdded()) {
       savedSecondaryInfo = secondaryInfo;
@@ -313,10 +365,17 @@ public class InCallFragment extends Fragment
 
   @Override
   public void setCallState(@NonNull PrimaryCallState primaryCallState) {
-    LogUtil.i("InCallFragment.setCallState", primaryCallState.toString());
+    LogUtil.i("InCallFragment.setCallState", primaryCallState.toString() +
+              ", Phonetype:" + phoneType);
     contactGridManager.setCallState(primaryCallState);
+    /// M: Get voice network type and phone type according to call account @{
+    updateInfoForButtonChooser(primaryCallState.state);
+    /// @}
     buttonChooser =
         ButtonChooserFactory.newButtonChooser(voiceNetworkType, primaryCallState.isWifi, phoneType);
+    /// M: Enable switch to secondary button when primary call active @{
+    setSwtichToSecondaryButton(primaryCallState.state);
+    /// @}
     updateButtonStates();
   }
 
@@ -547,4 +606,86 @@ public class InCallFragment extends Fragment
   private Fragment getLocationFragment() {
     return getChildFragmentManager().findFragmentById(R.id.incall_location_holder);
   }
+
+  /// M: ----------------------------MediaTek feature --------------------------
+  private boolean mNeedUpdateButtonInfo = true;
+  private boolean mNeedSetSecondaryButton = false;
+  private boolean mNeedInsetSecondaryView = true;
+  private int mCallProperties = 0;
+
+  private void updateInfoForButtonChooser(int state) {
+    DialerCall call = CallList.getInstance().getFirstCallWithState(state);
+    if (call == null) {
+      LogUtil.i("InCallFragment.updateInfoForButtonChooser", "no call, state: " + state);
+      return;
+    }
+    if (call.getDetails() == null) {
+      LogUtil.i("InCallFragment.updateInfoForButtonChooser", "no call details, state: " + state);
+      return;
+    }
+    LogUtil.d("InCallFragment.updateInfoForButtonChooser", String.valueOf(call));
+    /// M: ALPS03567937. Do not get network type and phone type in connecting status
+    // dut to performance. @{
+    if (call != null && !DialerCall.State.isConnecting(state)) {
+      voiceNetworkType = call.getVoiceNetworkTypeForCall();
+      phoneType = call.getPhoneTypeByNetworkType(voiceNetworkType);
+    }
+    /// @}
+  }
+
+  private void setSwtichToSecondaryButton(int state) {
+    if (mNeedSetSecondaryButton && state == DialerCall.State.ACTIVE) {
+      LogUtil.i("InCallFragment.setSwtichToSecondaryButton", "setAllowed");
+      getButtonController(InCallButtonIds.BUTTON_SWITCH_TO_SECONDARY).setAllowed(true);
+      mNeedSetSecondaryButton = false;
+    }
+  }
+
+  @Override
+  public void updateDeclineTimer() {
+  }
+
+  /**
+   * M: [Voice Record]
+   */
+  @Override
+  public void updateRecordStateUi(boolean isRecording) {
+      Log.d(this, "[updateRecordStateUi]... " + isRecording);
+
+      DialerCall ringCall = null;
+      int ringCallState = DialerCall.State.INVALID;
+      ringCall = CallList.getInstance().getIncomingCall();
+      if (null != ringCall) {
+          ringCallState = ringCall.getState();
+      }
+      if (isRecording && (ringCallState != DialerCall.State.INCOMING)
+              && (ringCallState != DialerCall.State.CALL_WAITING)) {
+          updateVoiceRecordIcon(true);
+      } else {
+          updateVoiceRecordIcon(false);
+      }
+      getButtonController(InCallButtonIds.BUTTON_SWITCH_VOICE_RECORD).setChecked(isRecording);
+  }
+
+  /// M: [Voice Record] recording indication icon @{
+  private ImageView mVoiceRecorderIcon;
+
+  private void initVoiceRecorderIcon(View view) {
+      mVoiceRecorderIcon = (ImageView) view.findViewById(R.id.voiceRecorderIcon);
+      mVoiceRecorderIcon.setImageResource(R.drawable.voice_record_indicator);
+      mVoiceRecorderIcon.setVisibility(View.INVISIBLE);
+  }
+
+  public void updateVoiceRecordIcon(boolean show) {
+      mVoiceRecorderIcon.setVisibility(show ? View.VISIBLE : View.INVISIBLE);
+      AnimationDrawable ad = (AnimationDrawable) mVoiceRecorderIcon.getDrawable();
+      if (ad != null) {
+          if (show && !ad.isRunning()) {
+              ad.start();
+          } else if (!show && ad.isRunning()) {
+              ad.stop();
+          }
+      }
+  }
+  /// @}
 }

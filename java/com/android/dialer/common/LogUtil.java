@@ -16,6 +16,7 @@
 
 package com.android.dialer.common;
 
+import android.os.SystemProperties;
 import android.support.annotation.NonNull;
 import android.support.annotation.Nullable;
 import android.telephony.PhoneNumberUtils;
@@ -26,6 +27,11 @@ public class LogUtil {
 
   public static final String TAG = "Dialer";
   private static final String SEPARATOR = " - ";
+  /// M: Optimize log output
+  private static final String PROP_FORCE_DEBUG_KEY = "persist.log.tag.tel_dbg";
+  public static final boolean FORCE_DEBUG =
+          (SystemProperties.getInt(PROP_FORCE_DEBUG_KEY, 0) == 1); /* STOPSHIP if true */
+  /// @}
 
   private LogUtil() {}
 
@@ -203,7 +209,9 @@ public class LogUtil {
     String formattedMsg;
     // Either null is passed as a single argument or more than one argument is passed.
     boolean hasArgs = args == null || args.length > 0;
-    if ((level >= android.util.Log.INFO) || android.util.Log.isLoggable(tag, level)) {
+    if ((level >= android.util.Log.INFO) || android.util.Log.isLoggable(tag, level)
+        /// M: Optimize log output.
+        || FORCE_DEBUG) {
       formattedMsg = localTag;
       if (!TextUtils.isEmpty(msg)) {
         formattedMsg += SEPARATOR + (hasArgs ? String.format(msg, args) : msg);

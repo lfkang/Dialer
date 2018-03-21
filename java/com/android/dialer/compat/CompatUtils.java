@@ -16,8 +16,14 @@
 package com.android.dialer.compat;
 
 import android.os.Build;
+import android.os.Build.VERSION;
+import android.support.annotation.Nullable;
+import android.text.TextUtils;
+import android.util.Log;
+import java.lang.reflect.InvocationTargetException;
 
 public final class CompatUtils {
+  private static final String TAG = CompatUtils.class.getSimpleName();
 
   /** PrioritizedMimeType is added in API level 23. */
   public static boolean hasPrioritizedMimeType() {
@@ -64,4 +70,100 @@ public final class CompatUtils {
   public static boolean isCallSubjectCompatible() {
     return SdkVersionOverride.getSdkVersion(Build.VERSION_CODES.LOLLIPOP) >= Build.VERSION_CODES.M;
   }
+
+  /// M: Mediatek start.
+  /**
+   * Determines if this version is compatible with Lollipop Mr1-specific APIs. Can also force the
+   * version to be lower through SdkVersionOverride.
+   *
+   * @return {@code true} if runtime sdk is compatible with Lollipop MR1, {@code false} otherwise.
+   */
+  public static boolean isLollipopMr1Compatible() {
+    return SdkVersionOverride.getSdkVersion(Build.VERSION_CODES.LOLLIPOP_MR1)
+        >= Build.VERSION_CODES.LOLLIPOP_MR1;
+  }
+
+
+  /**
+   * Invokes a given class's method using reflection. Can be used to call system apis that exist at
+   * runtime but not in the SDK.
+   *
+   * @param instance The instance of the class to invoke the method on.
+   * @param methodName The name of the method to invoke.
+   * @param parameterTypes The needed parameter types for the method.
+   * @param parameters The parameter values to pass into the method.
+   * @return The result of the invocation or {@code null} if instance or methodName are empty, or if
+   *     the reflection fails.
+   */
+  @Nullable
+  public static Object invokeMethod(
+      @Nullable Object instance,
+      @Nullable String methodName,
+      Class<?>[] parameterTypes,
+      Object[] parameters) {
+    if (instance == null || TextUtils.isEmpty(methodName)) {
+      return null;
+    }
+
+    String className = instance.getClass().getName();
+    try {
+      return Class.forName(className)
+          .getMethod(methodName, parameterTypes)
+          .invoke(instance, parameters);
+    } catch (ClassNotFoundException
+        | NoSuchMethodException
+        | IllegalArgumentException
+        | IllegalAccessException
+        | InvocationTargetException e) {
+      Log.v(TAG, "Could not invoke method: " + className + "#" + methodName);
+      return null;
+    } catch (Throwable t) {
+      Log.e(
+          TAG,
+          "Unexpected exception when invoking method: "
+              + className
+              + "#"
+              + methodName
+              + " at runtime",
+          t);
+      return null;
+    }
+  }
+
+  /**
+   * Determines if the given class is available. Can be used to check if system apis exist at
+   * runtime.
+   *
+   * @param className the name of the class to look for.
+   * @return {@code true} if the given class is available, {@code false} otherwise or if className
+   *     is empty.
+   */
+  public static boolean isClassAvailable(@Nullable String className) {
+    if (TextUtils.isEmpty(className)) {
+      return false;
+    }
+    try {
+      Class.forName(className);
+      return true;
+    } catch (ClassNotFoundException e) {
+      return false;
+    } catch (Throwable t) {
+      Log.e(
+          TAG,
+          "Unexpected exception when checking if class:" + className + " exists at " + "runtime",
+          t);
+      return false;
+    }
+  }
+
+  /**
+   * Determines if this version is compatible with N-specific APIs.
+   *
+   * @return {@code true} if runtime sdk is compatible with N and the app is built with N, {@code
+   * false} otherwise.
+   */
+  public static boolean isNCompatible() {
+      return Build.VERSION.SDK_INT >= Build.VERSION_CODES.N;
+  }
+  /// M: Mediatek end.
 }

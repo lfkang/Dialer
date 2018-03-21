@@ -26,7 +26,12 @@ import android.view.ViewGroup;
 import com.android.contacts.common.ContactPhotoManager.DefaultImageRequest;
 import com.android.contacts.common.R;
 import com.android.contacts.common.preference.ContactsPreferences;
+import com.mediatek.dialer.compat.ContactsCompat.RawContactsCompat;
+import com.mediatek.dialer.util.DialerFeatureOptions;
 
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
 /**
  * A cursor adapter for the {@link ContactsContract.Contacts#CONTENT_TYPE} content type. Also
  * includes support for including the {@link ContactsContract.Profile} record in the list.
@@ -63,7 +68,9 @@ public abstract class ContactListAdapter extends ContactEntryListAdapter {
   @Override
   protected ContactListItemView newView(
       Context context, int partition, Cursor cursor, int position, ViewGroup parent) {
-    ContactListItemView view = super.newView(context, partition, cursor, position, parent);
+    ///M:For [MTK Dialer Search] customization
+    ContactListItemView view = (ContactListItemView) super.newView(context, partition, cursor,
+        position, parent);
     view.setUnknownNameText(mUnknownNameText);
     view.setQuickContactEnabled(isQuickContactEnabled());
     view.setAdjustSelectionBoundsEnabled(isAdjustSelectionBoundsEnabled());
@@ -145,20 +152,30 @@ public abstract class ContactListAdapter extends ContactEntryListAdapter {
 
   /** @return Projection useful for children. */
   protected final String[] getProjection(boolean forSearch) {
+    String[] projection;
     final int sortOrder = getContactNameDisplayOrder();
     if (forSearch) {
       if (sortOrder == ContactsPreferences.DISPLAY_ORDER_PRIMARY) {
-        return ContactQuery.FILTER_PROJECTION_PRIMARY;
+        projection = ContactQuery.FILTER_PROJECTION_PRIMARY;
       } else {
-        return ContactQuery.FILTER_PROJECTION_ALTERNATIVE;
+        projection = ContactQuery.FILTER_PROJECTION_ALTERNATIVE;
       }
     } else {
       if (sortOrder == ContactsPreferences.DISPLAY_ORDER_PRIMARY) {
-        return ContactQuery.CONTACT_PROJECTION_PRIMARY;
+        projection = ContactQuery.CONTACT_PROJECTION_PRIMARY;
       } else {
-        return ContactQuery.CONTACT_PROJECTION_ALTERNATIVE;
+        projection = ContactQuery.CONTACT_PROJECTION_ALTERNATIVE;
       }
     }
+    ///M:[MTK SIM Contacts feature] @{
+      List<String> projectionList = new ArrayList<>(Arrays.asList(projection));
+      if (DialerFeatureOptions.isSimContactsSupport()) {
+        projectionList.add(RawContactsCompat.INDICATE_PHONE_SIM);
+        projectionList.add(RawContactsCompat.IS_SDN_CONTACT);
+      }
+      projection = projectionList.toArray(new String[projectionList.size()]);
+      return projection;
+    ///@}
   }
 
   protected static class ContactQuery {

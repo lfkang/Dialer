@@ -38,5 +38,7 @@ final class AddContactViewHolder extends ViewHolder implements OnClickListener {
   public void onClick(View v) {
     DialerUtils.startActivityWithErrorToast(
         context, IntentUtil.getNewContactIntent(), R.string.add_contact_not_available);
+    ///M: disable view's clickable in 1000ms to avoid double or trible click.
+    DialerUtils.disableViewClickableInDuration(v, 1000 /*ms*/);
   }
 }

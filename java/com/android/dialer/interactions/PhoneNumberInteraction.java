@@ -64,6 +64,8 @@ import com.android.dialer.logging.InteractionEvent;
 import com.android.dialer.logging.Logger;
 import com.android.dialer.util.DialerUtils;
 import com.android.dialer.util.TransactionSafeActivity;
+import com.mediatek.dialer.compat.ContactsCompat.ImsCallCompat;
+
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
 import java.util.ArrayList;
@@ -101,12 +103,15 @@ public class PhoneNumberInteraction implements OnLoadCompleteListener<Cursor> {
       };
 
   private static final String PHONE_NUMBER_SELECTION =
+      /// M: Add ImsCall type into selection.
       Data.MIMETYPE
           + " IN ('"
           + Phone.CONTENT_ITEM_TYPE
           + "', "
           + "'"
           + SipAddress.CONTENT_ITEM_TYPE
+          + "',"
+          + "'" + ImsCallCompat.CONTENT_ITEM_TYPE
           + "') AND "
           + Data.DATA1
           + " NOT NULL";
@@ -154,7 +159,7 @@ public class PhoneNumberInteraction implements OnLoadCompleteListener<Cursor> {
     void onDisambigDialogDismissed();
   }
 
-  private PhoneNumberInteraction(
+  /*private*/ PhoneNumberInteraction(
       Context context,
       int interactionType,
       boolean isVideoCall,
@@ -217,7 +222,7 @@ public class PhoneNumberInteraction implements OnLoadCompleteListener<Cursor> {
    *
    * @param uri Contact Uri
    */
-  private void startInteraction(Uri uri) {
+  /*private*/ void startInteraction(Uri uri) {
     // It's possible for a shortcut to have been created, and then permissions revoked. To avoid a
     // crash when the user tries to use such a shortcut, check for this condition and ask the user
     // for the permission.
@@ -349,7 +354,7 @@ public class PhoneNumberInteraction implements OnLoadCompleteListener<Cursor> {
     return mLoader;
   }
 
-  private void showDisambiguationDialog(ArrayList<PhoneItem> phoneList) {
+  /*private*/ void showDisambiguationDialog(ArrayList<PhoneItem> phoneList) {
     final Activity activity = (Activity) mContext;
     if (activity.isDestroyed()) {
       // Check whether the activity is still running
@@ -395,7 +400,7 @@ public class PhoneNumberInteraction implements OnLoadCompleteListener<Cursor> {
     /** {@link Phone#CONTENT_ITEM_TYPE} or {@link SipAddress#CONTENT_ITEM_TYPE}. */
     String mimeType;
 
-    private PhoneItem() {}
+    /*private*/ PhoneItem() {}
 
     private PhoneItem(Parcel in) {
       this.id = in.readLong();
@@ -461,6 +466,18 @@ public class PhoneNumberInteraction implements OnLoadCompleteListener<Cursor> {
           ContactDisplayUtils.getLabelForCallOrSms(
               (int) item.type, item.label, mInteractionType, getContext());
 
+      /// M: set other type text value when mime type was Sip or Ims @{
+      if (SipAddress.CONTENT_ITEM_TYPE.equals(item.mimeType) ||
+           ImsCallCompat.CONTENT_ITEM_TYPE.equals(item.mimeType)) {
+        if (ContactDisplayUtils.INTERACTION_CALL == mInteractionType) {
+          value = getContext().getResources().getText(
+              ContactDisplayUtils.getPhoneLabelResourceId(null));
+        } else {
+          value = getContext().getResources().getText(
+              ContactDisplayUtils.getSmsLabelResourceId(null));
+        }
+      }
+      /// @}
       typeView.setText(value);
       return view;
     }

@@ -57,7 +57,6 @@ import com.android.dialer.constants.Constants;
 import com.android.dialer.logging.DialerImpression;
 import com.android.dialer.logging.Logger;
 import com.android.dialer.phonenumbercache.CallLogQuery;
-import com.android.dialer.telecom.TelecomUtil;
 import com.android.dialer.util.PermissionsUtil;
 import com.google.common.io.ByteStreams;
 import java.io.File;
@@ -388,6 +387,7 @@ public class VoicemailPlaybackPresenter
 
   /** Checks to see if we have content available for this voicemail. */
   protected void checkForContent(final OnContentCheckedListener callback) {
+    LogUtil.d("VoicemailPlaybackPresenter.checkForContent", "AsyncTaskExecutor.submit.");
     mAsyncTaskExecutor.submit(
         Tasks.CHECK_FOR_CONTENT,
         new AsyncTask<Void, Void, Boolean>() {
@@ -455,6 +455,7 @@ public class VoicemailPlaybackPresenter
         break;
     }
 
+    LogUtil.d("VoicemailPlaybackPresenter.requestContent", "AsyncTaskExecutor.submit.");
     mAsyncTaskExecutor.submit(
         Tasks.SEND_FETCH_REQUEST,
         new AsyncTask<Void, Void, Void>() {
@@ -515,11 +516,6 @@ public class VoicemailPlaybackPresenter
 
     mView.disableUiElements();
     mIsPrepared = false;
-
-    if (mContext != null && TelecomUtil.isInCall(mContext)) {
-      handleError(new IllegalStateException("Cannot play voicemail when call is in progress"));
-      return;
-    }
 
     try {
       mMediaPlayer = new MediaPlayer();
@@ -1086,6 +1082,7 @@ public class VoicemailPlaybackPresenter
 
     @Override
     public void onChange(boolean selfChange) {
+      LogUtil.d("VoicemailPlaybackPresenter.onChange", "AsyncTaskExecutor.submit.");
       mAsyncTaskExecutor.submit(
           Tasks.CHECK_CONTENT_AFTER_CHANGE,
           new AsyncTask<Void, Void, Boolean>() {

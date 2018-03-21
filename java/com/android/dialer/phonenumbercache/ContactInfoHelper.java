@@ -48,6 +48,10 @@ import com.android.dialer.phonenumbercache.CachedNumberLookupService.CachedConta
 import com.android.dialer.phonenumberutil.PhoneNumberHelper;
 import com.android.dialer.telecom.TelecomUtil;
 import com.android.dialer.util.PermissionsUtil;
+import com.mediatek.dialer.compat.CallLogCompat.CallsCompat;
+import com.mediatek.dialer.compat.ContactsCompat.PhoneLookupCompat;
+import com.mediatek.dialer.util.DialerFeatureOptions;
+
 import java.util.ArrayList;
 import java.util.List;
 import org.json.JSONException;
@@ -77,7 +81,8 @@ public class ContactInfoHelper {
    * @return JSON-encoded URI that can be used to perform a lookup when clicking on the quick
    *     contact card.
    */
-  private static Uri createTemporaryContactUri(String number) {
+  /*M: change modifier to public*/
+  /*private*/public static Uri createTemporaryContactUri(String number) {
     try {
       final JSONObject contactRows =
           new JSONObject()
@@ -199,7 +204,16 @@ public class ContactInfoHelper {
         UriUtils.nullForNonContactsUri(
             UriUtils.parseUriOrNull(c.getString(CallLogQuery.CACHED_PHOTO_URI)));
     info.formattedNumber = c.getString(CallLogQuery.CACHED_FORMATTED_NUMBER);
-
+    /// M:[MTK SIM Contacts feature] get cached sim indicate and is sdn @{
+    int indicateSimIndex = c.getColumnIndex(PhoneLookupCompat.INDICATE_PHONE_SIM);
+    int sdnContactIndex = c.getColumnIndex(PhoneLookupCompat.IS_SDN_CONTACT);
+    if (indicateSimIndex != -1) {
+      info.contactSimId = c.getInt(indicateSimIndex);
+    }
+    if (sdnContactIndex != -1) {
+      info.isSdnContact = c.getInt(sdnContactIndex);
+    }
+    /// @}
     return info;
   }
 
@@ -224,14 +238,12 @@ public class ContactInfoHelper {
   @SuppressWarnings("ReferenceEquality")
   public ContactInfo lookupNumber(String number, String countryIso, long directoryId) {
     if (TextUtils.isEmpty(number)) {
-      LogUtil.d("ContactInfoHelper.lookupNumber", "number is empty");
       return null;
     }
 
     ContactInfo info;
 
     if (PhoneNumberHelper.isUriNumber(number)) {
-      LogUtil.d("ContactInfoHelper.lookupNumber", "number is sip");
       // The number is a SIP address..
       info = lookupContactFromUri(getContactInfoLookupUri(number, directoryId));
       if (info == null || info == ContactInfo.EMPTY) {
@@ -249,7 +261,6 @@ public class ContactInfoHelper {
     final ContactInfo updatedInfo;
     if (info == null) {
       // The lookup failed.
-      LogUtil.d("ContactInfoHelper.lookupNumber", "lookup failed");
       updatedInfo = null;
     } else {
       // If we did not find a matching contact, generate an empty contact info for the number.
@@ -329,11 +340,9 @@ public class ContactInfoHelper {
    */
   ContactInfo lookupContactFromUri(Uri uri) {
     if (uri == null) {
-      LogUtil.d("ContactInfoHelper.lookupContactFromUri", "uri is null");
       return null;
     }
     if (!PermissionsUtil.hasContactsReadPermissions(mContext)) {
-      LogUtil.d("ContactInfoHelper.lookupContactFromUri", "no contact permission, return empty");
       return ContactInfo.EMPTY;
     }
 
@@ -347,7 +356,6 @@ public class ContactInfoHelper {
       return null;
     }
     if (phoneLookupCursor == null) {
-      LogUtil.d("ContactInfoHelper.lookupContactFromUri", "phoneLookupCursor is null");
       return null;
     }
 
@@ -381,6 +389,16 @@ public class ContactInfoHelper {
         ContactsUtils.determineUserType(null, phoneLookupCursor.getLong(PhoneQuery.PERSON_ID));
     info.contactExists = true;
 
+    /// M:[MTK SIM Contacts feature] @{
+    int indicateSimIndex = phoneLookupCursor.getColumnIndex(PhoneLookupCompat.INDICATE_PHONE_SIM);
+    int sdnContactIndex = phoneLookupCursor.getColumnIndex(PhoneLookupCompat.IS_SDN_CONTACT);
+    if (indicateSimIndex != -1) {
+      info.contactSimId = phoneLookupCursor.getInt(indicateSimIndex);
+    }
+    if (sdnContactIndex != -1) {
+      info.isSdnContact = phoneLookupCursor.getInt(sdnContactIndex);
+    }
+    /// @}
     return info;
   }
 
@@ -416,14 +434,10 @@ public class ContactInfoHelper {
   private ContactInfo queryContactInfoForPhoneNumber(
       String number, String countryIso, long directoryId) {
     if (TextUtils.isEmpty(number)) {
-      LogUtil.d("ContactInfoHelper.queryContactInfoForPhoneNumber", "number is empty");
       return null;
     }
 
     ContactInfo info = lookupContactFromUri(getContactInfoLookupUri(number, directoryId));
-    if (info == null) {
-      LogUtil.d("ContactInfoHelper.queryContactInfoForPhoneNumber", "info looked up is null");
-    }
     if (info != null && info != ContactInfo.EMPTY) {
       info.formattedNumber = formatPhoneNumber(number, null, countryIso);
       if (directoryId == -1) {
@@ -439,8 +453,6 @@ public class ContactInfoHelper {
       if (cacheInfo != null) {
         if (!cacheInfo.getContactInfo().isBadData) {
           info = cacheInfo.getContactInfo();
-        } else {
-          LogUtil.i("ContactInfoHelper.queryContactInfoForPhoneNumber", "info is bad data");
         }
       }
     }
@@ -540,6 +552,19 @@ public class ContactInfoHelper {
         values.put(Calls.GEOCODED_LOCATION, updatedInfo.geoDescription);
         needsUpdate = true;
       }
+
+      /// M:[MTK SIM Contacts feature] update indicate sim and sdn info if changed @{
+      if (DialerFeatureOptions.isSimContactsSupport()) {
+        if (updatedInfo.contactSimId != callLogInfo.contactSimId) {
+          values.put(CallsCompat.CACHED_INDICATE_PHONE_SIM, updatedInfo.contactSimId);
+          needsUpdate = true;
+        }
+        if (updatedInfo.isSdnContact != callLogInfo.isSdnContact) {
+          values.put(CallsCompat.CACHED_IS_SDN_CONTACT, updatedInfo.isSdnContact);
+          needsUpdate = true;
+        }
+      }
+      /// @}
     } else {
       // No previous values, store all of them.
       values.put(Calls.CACHED_NAME, updatedInfo.name);
@@ -554,6 +579,12 @@ public class ContactInfoHelper {
           UriUtils.uriToString(UriUtils.nullForNonContactsUri(updatedInfo.photoUri)));
       values.put(Calls.CACHED_FORMATTED_NUMBER, updatedInfo.formattedNumber);
       values.put(Calls.GEOCODED_LOCATION, updatedInfo.geoDescription);
+      /// M:[MTK SIM Contacts feature] store indicate sim and sdn info
+      if (DialerFeatureOptions.isSimContactsSupport()) {
+        values.put(CallsCompat.CACHED_INDICATE_PHONE_SIM, updatedInfo.contactSimId);
+        values.put(CallsCompat.CACHED_IS_SDN_CONTACT, updatedInfo.isSdnContact);
+      }
+      /// @}
       needsUpdate = true;
     }
 
@@ -562,23 +593,43 @@ public class ContactInfoHelper {
     }
 
     try {
-      if (countryIso == null) {
-        mContext
-            .getContentResolver()
-            .update(
-                TelecomUtil.getCallLogUri(mContext),
-                values,
-                Calls.NUMBER + " = ? AND " + Calls.COUNTRY_ISO + " IS NULL",
-                new String[] {number});
-      } else {
-        mContext
-            .getContentResolver()
-            .update(
-                TelecomUtil.getCallLogUri(mContext),
-                values,
-                Calls.NUMBER + " = ? AND " + Calls.COUNTRY_ISO + " = ?",
-                new String[] {number, countryIso});
-      }
+            /// M: For number with post digits, it need to be extracted to 2 parts.
+            /// Calls.POST_DIAL_DIGITS field must be filled in updating selection. @{
+            String networkDigits = PhoneNumberUtils.extractNetworkPortion(number);
+            String postDigits = PhoneNumberUtils.extractPostDialPortion(number);
+            if (!TextUtils.isEmpty(postDigits)) {
+                if (countryIso == null) {
+                    mContext.getContentResolver().update(
+                            TelecomUtil.getCallLogUri(mContext),
+                            values,
+                            Calls.NUMBER + " = ? AND " + Calls.POST_DIAL_DIGITS + " = ? AND "
+                            + Calls.COUNTRY_ISO + " IS NULL",
+                            new String[]{ networkDigits, postDigits });
+                } else {
+                    mContext.getContentResolver().update(
+                            TelecomUtil.getCallLogUri(mContext),
+                            values,
+                            Calls.NUMBER + " = ? AND " + Calls.POST_DIAL_DIGITS + " = ? AND "
+                            + Calls.COUNTRY_ISO + " = ?",
+                            new String[]{ networkDigits, postDigits, countryIso });
+                }
+            /// @}
+            } else {
+                if (countryIso == null) {
+                    mContext.getContentResolver().update(
+                            TelecomUtil.getCallLogUri(mContext),
+                            values,
+                            Calls.NUMBER + " = ? AND " + Calls.COUNTRY_ISO
+                                    + " IS NULL", new String[] { number });
+                } else {
+                    mContext.getContentResolver().update(
+                            TelecomUtil.getCallLogUri(mContext),
+                            values,
+                            Calls.NUMBER + " = ? AND " + Calls.COUNTRY_ISO
+                                    + " = ?",
+                            new String[] { number, countryIso });
+                }
+            }
     } catch (SQLiteFullException e) {
       LogUtil.e(TAG, "Unable to update contact info in call log db", e);
     }

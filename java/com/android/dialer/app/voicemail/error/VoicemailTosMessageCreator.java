@@ -33,8 +33,8 @@ import android.view.View;
 import android.view.View.OnClickListener;
 import com.android.contacts.common.compat.TelephonyManagerCompat;
 import com.android.dialer.app.voicemail.error.VoicemailErrorMessage.Action;
+import com.android.dialer.buildtype.BuildType;
 import com.android.dialer.common.LogUtil;
-import com.android.dialer.configprovider.ConfigProviderBindings;
 import com.android.dialer.logging.DialerImpression;
 import com.android.dialer.logging.Logger;
 import com.android.voicemail.VisualVoicemailTypeExtensions;
@@ -75,15 +75,17 @@ public class VoicemailTosMessageCreator {
 
   @Nullable
   VoicemailErrorMessage maybeCreateTosMessage() {
-    // TODO: add filtering based on carrier
+    // TODO(mdooley): add filtering based on carrier
     if (hasAcceptedTos()) {
       return null;
     }
-
-    if (!shouldShowTos()) {
+    // TODO(mdooley): temporarily skip the terms of service for dogfood builds
+    if (BuildType.get() == BuildType.DOGFOOD) {
+      LogUtil.i(
+          "VoicemailTosMessageCreator.maybeCreateTosMessage",
+          "Skipping voicemail ToS for dogfood build");
       return null;
     }
-
     logTosCreatedImpression();
 
     return new VoicemailTosMessage(
@@ -117,25 +119,6 @@ public class VoicemailTosMessageCreator {
                 true /* raised */))
         .setModal(true)
         .setImageResourceId(getTosImageId());
-  }
-
-  private boolean shouldShowTos() {
-    if (isVvm3()) {
-      LogUtil.i("VoicemailTosMessageCreator.shouldShowTos", "showing TOS for verizon");
-      return true;
-    }
-
-    if (isVoicemailTranscriptionEnabled()) {
-      LogUtil.i(
-          "VoicemailTosMessageCreator.shouldShowTos", "showing TOS for Google transcription users");
-      return true;
-    }
-
-    return false;
-  }
-
-  private boolean isVoicemailTranscriptionEnabled() {
-    return ConfigProviderBindings.get(context).getBoolean("voicemail_transcription_enabled", false);
   }
 
   private void showDeclineTosDialog(final PhoneAccountHandle handle) {
@@ -266,10 +249,6 @@ public class VoicemailTosMessageCreator {
   }
 
   private CharSequence getDialerTos() {
-    if (!isVoicemailTranscriptionEnabled()) {
-      return "";
-    }
-
     return useSpanish()
         ? context.getString(R.string.dialer_terms_and_conditions_1_0_spanish)
         : context.getString(R.string.dialer_terms_and_conditions_1_0_english);

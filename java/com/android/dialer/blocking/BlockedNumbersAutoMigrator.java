@@ -71,7 +71,8 @@ public class BlockedNumbersAutoMigrator {
    * performed only when the user has no blocked numbers. As a result of this method, the user will
    * be migrated to the framework blocking solution if blocked numbers don't exist.
    */
-  private void autoMigrate(boolean shouldAttemptAutoMigrate) {
+  /**M:modify for test case.*/
+  /*private*/ void autoMigrate(boolean shouldAttemptAutoMigrate) {
     if (!shouldAttemptAutoMigrate) {
       return;
     }

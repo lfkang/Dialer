@@ -23,6 +23,8 @@ import android.telecom.PhoneAccount;
 import android.telecom.PhoneAccountHandle;
 import android.text.TextUtils;
 import com.android.dialer.telecom.TelecomUtil;
+import com.mediatek.dialer.ext.ExtensionManager;
+
 import java.util.ArrayList;
 import java.util.List;
 
@@ -96,7 +98,8 @@ public class PhoneAccountUtils {
   @Nullable
   private static PhoneAccount getAccountOrNull(
       Context context, @Nullable PhoneAccountHandle accountHandle) {
-    if (TelecomUtil.getCallCapablePhoneAccounts(context).size() <= 1) {
+    if (TelecomUtil.getCallCapablePhoneAccounts(context).size() <= 1 &&
+        ExtensionManager.getCallLogExtension().shouldReturnAccountNull()) {
       return null;
     }
     return TelecomUtil.getPhoneAccount(context, accountHandle);

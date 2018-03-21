@@ -118,14 +118,16 @@ public class ContactsFragment extends Fragment
 
   @Override
   public void onLoadFinished(Loader<Cursor> loader, Cursor cursor) {
-    if (cursor.getCount() == 0) {
+    //M: the cursor is null at sometime, so add null checking when use is.
+    if (cursor == null || cursor.getCount() == 0) {
       emptyContentView.setDescription(R.string.all_contacts_empty);
       emptyContentView.setActionLabel(R.string.all_contacts_empty_add_contact_action);
       emptyContentView.setVisibility(View.VISIBLE);
-      recyclerView.setVisibility(View.GONE);
+      recyclerView.setAdapter(null);
+      fastScroller.setVisibility(View.GONE);
+      anchoredHeader.setVisibility(View.INVISIBLE);
     } else {
       emptyContentView.setVisibility(View.GONE);
-      recyclerView.setVisibility(View.VISIBLE);
       adapter = new ContactsAdapter(getContext(), cursor);
       manager =
           new LinearLayoutManager(getContext()) {
@@ -221,6 +223,8 @@ public class ContactsFragment extends Fragment
       // Add new contact
       DialerUtils.startActivityWithErrorToast(
           getContext(), IntentUtil.getNewContactIntent(), R.string.add_contact_not_available);
+      ///M: disable view's clickable in 1000ms to avoid double or trible click.
+      DialerUtils.disableViewClickableInDuration(emptyContentView, 1000 /*ms*/);
     } else {
       throw Assert.createIllegalStateFailException("Invalid empty content view action label.");
     }
@@ -237,4 +241,19 @@ public class ContactsFragment extends Fragment
       }
     }
   }
+
+  /// M: ReEnter after permission changed, need to check current permission. @{
+  @Override
+  public void onResume() {
+    super.onResume();
+    if (emptyContentView.getActionLabel() == R.string.permission_single_turn_on &&
+        (emptyContentView.getVisibility() == View.VISIBLE)) {
+        // We didn't have the permission before, and now we do. need initLoader to load contacts.
+      if (PermissionsUtil.hasContactsReadPermissions(getContext())) {
+        getLoaderManager().initLoader(0, null, this);
+        emptyContentView.setVisibility(View.GONE);
+      }
+    }
+  }
+  /// @}
 }

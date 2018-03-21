@@ -62,7 +62,8 @@ import com.android.dialer.compat.AppCompatConstants;
    */
   @WorkerThread
   public void updatePhoneCallDetails(PhoneCallDetails details) {
-    Assert.isWorkerThread();
+    /// M: ALPS03446184  call log load perfemance
+    //Assert.isWorkerThread();
     details.callLocationAndDate = mPhoneCallDetailsHelper.getCallLocationAndDate(details);
     details.callDescription = getCallDescription(details);
   }
@@ -273,4 +274,10 @@ import com.android.dialer.compat.AppCompatConstants;
     }
     return recipient;
   }
+
+  /// M: [Dialer Global Search] Highlight the search text @{
+  public void setHighlightedText(char[] highlightedText) {
+    mPhoneCallDetailsHelper.setHighlightedText(highlightedText);
+  }
+  /// @}
 }

@@ -26,8 +26,14 @@ import android.telecom.VideoProfile.CameraCapabilities;
 import com.android.dialer.common.LogUtil;
 import com.android.dialer.logging.DialerImpression;
 import com.android.dialer.logging.LoggingBindings;
+import com.android.incallui.InCallPresenter;
 import com.android.incallui.videotech.VideoTech.VideoTechListener;
 import com.android.incallui.videotech.utils.SessionModificationState;
+import com.mediatek.incallui.video.VideoSessionController;
+
+/// M: for plugin extension:OP09. @{
+import com.mediatek.incallui.plugin.ExtensionManager;
+/// @}
 
 /** Receives IMS video call state updates. */
 public class ImsVideoCallCallback extends VideoCall.Callback {
@@ -61,15 +67,41 @@ public class ImsVideoCallCallback extends VideoCall.Callback {
     boolean wasVideoCall = VideoProfile.isVideo(previousVideoState);
     boolean isVideoCall = VideoProfile.isVideo(newVideoState);
 
+    /// M: handle cancel upgrade request  @{
+    if (newVideoState == mediatek.telecom.MtkVideoProfile.STATE_CANCEL_UPGRADE ) {
+          videoTech.setSessionModificationState(
+                  SessionModificationState.NO_REQUEST);
+          InCallPresenter.getInstance().showMessage(
+                     com.android.incallui.R.string.peer_cancel_upgrade_request);
+          return;
+    }
+    ///@}
+
     if (wasVideoCall && !isVideoCall) {
       LogUtil.i(
           "ImsVideoTech.onSessionModifyRequestReceived", "call downgraded to %d", newVideoState);
+      /// M: need handle downgrade by peer or NW.
+      listener.onDowngradeToAudio();
     } else if (previousVideoState != newVideoState) {
-      requestedVideoState = newVideoState;
-      videoTech.setSessionModificationState(
-          SessionModificationState.RECEIVED_UPGRADE_TO_VIDEO_REQUEST);
-      listener.onVideoUpgradeRequestReceived();
-      logger.logImpression(DialerImpression.Type.IMS_VIDEO_REQUEST_RECEIVED);
+      /// M: During call paused, IMS FW will ignore video state changed. @{
+      /// So RXTX->TX request notification cannot cancel by ImsVideoTech.onCallStateChanged.
+      if (VideoProfile.isPaused(call.getDetails().getVideoState()) &&
+          newVideoState == VideoProfile.STATE_TX_ENABLED) {
+        LogUtil.i(
+          "ImsVideoTech.onSessionModifyRequestReceived", "ignore request");
+        videoTech.setSessionModificationState(SessionModificationState.NO_REQUEST);
+      } else {
+        requestedVideoState = newVideoState;
+        videoTech.setSessionModificationState(
+            SessionModificationState.RECEIVED_UPGRADE_TO_VIDEO_REQUEST);
+        listener.onVideoUpgradeRequestReceived();
+        logger.logImpression(DialerImpression.Type.IMS_VIDEO_REQUEST_RECEIVED);
+      }
+      ///@}
+    /// M: Send response for duplicate session request. @{
+    } else if (previousVideoState == newVideoState) {
+      call.getVideoCall().sendSessionModifyResponse(videoProfile);
+    ///@}
     }
   }
 
@@ -91,12 +123,73 @@ public class ImsVideoCallCallback extends VideoCall.Callback {
         responseProfile,
         videoTech.getSessionModificationState());
 
-    if (videoTech.getSessionModificationState()
-        == SessionModificationState.WAITING_FOR_UPGRADE_TO_VIDEO_RESPONSE) {
+    /// M: handle cancel upgrade response  @{
+    int sessionModificationState = videoTech.getSessionModificationState();
+        if (sessionModificationState == SessionModificationState.NO_REQUEST ) {
+            LogUtil.i("ImsVideoCallCallback.onSessionModifyResponseReceived",
+                    "not handle in no request state");
+            return;
+        }
+        if (sessionModificationState
+               == SessionModificationState.WAITING_FOR_CANCEL_UPGRADE_RESPONSE ) {
+            switch (status) {
+            case mediatek.telecom.MtkConnection.MtkVideoProvider.
+                         SESSION_MODIFY_CANCEL_UPGRADE_FAIL_AUTO_DOWNGRADE:
+                 call.getVideoCall().sendSessionModifyRequest(
+                         new VideoProfile(VideoProfile.STATE_AUDIO_ONLY));
+                 break;
+            case mediatek.telecom.MtkConnection.MtkVideoProvider.SESSION_MODIFY_CANCEL_UPGRADE_FAIL:
+                 InCallPresenter.getInstance().showMessage(
+                         com.android.incallui.R.string.cancel_upgrade_fail);
+                 LogUtil.i("ImsVideoCallCallback.onSessionModifyResponseReceived",
+                         " cancel fail to become vilte call");
+                 break;
+            case mediatek.telecom.MtkConnection.MtkVideoProvider.
+                         SESSION_MODIFY_CANCEL_UPGRADE_FAIL_REMOTE_REJECT_UPGRADE:
+                 LogUtil.i("ImsVideoCallCallback.onSessionModifyResponseReceived",
+                         " cancel fail by remote reject upgrade ");
+                 break;
+            case VideoProvider.SESSION_MODIFY_REQUEST_SUCCESS:
+                 if (responseProfile.getVideoState() != mediatek.telecom.
+                         MtkVideoProfile.STATE_CANCEL_UPGRADE) {
+                     return;
+                 }
+                 LogUtil.i("ImsVideoCallCallback.onSessionModifyResponseReceived",
+                         " cancel success ");
+                 break;
+            default:
+                 VideoSessionController.getInstance().stopTiming();
+                 LogUtil.i("ImsVideoCallCallback.onSessionModifyResponseReceived"," not handle ");
+                 return;
+            }
+
+            VideoSessionController.getInstance().stopTiming();
+            if (status == mediatek.telecom.MtkConnection.MtkVideoProvider.
+                    SESSION_MODIFY_CANCEL_UPGRADE_FAIL_AUTO_DOWNGRADE ) {
+                videoTech.setSessionModificationState(
+                        SessionModificationState.WAITING_FOR_RESPONSE);
+            } else {
+                videoTech.setSessionModificationState(SessionModificationState.NO_REQUEST);
+            }
+
+            return;
+        }
+    /// @}
+
+    if ((videoTech.getSessionModificationState()
+        == SessionModificationState.WAITING_FOR_UPGRADE_TO_VIDEO_RESPONSE)
+        /// M:ALPS03519005  handle downgrade to voice call or resume two-way video fail@{
+        || (videoTech.getSessionModificationState()
+        == SessionModificationState.WAITING_FOR_RESPONSE)) {
+        ///@}
       handler.removeCallbacksAndMessages(null); // Clear everything
 
       final int newSessionModificationState = getSessionModificationStateFromTelecomStatus(status);
-      if (status == VideoProvider.SESSION_MODIFY_REQUEST_SUCCESS) {
+      ///M:ALPS03519005 handle downgrade to voice call or resume two-way video fail.@{
+      if (videoTech.getSessionModificationState()
+          == SessionModificationState.WAITING_FOR_UPGRADE_TO_VIDEO_RESPONSE &&
+          ///@}
+         status == VideoProvider.SESSION_MODIFY_REQUEST_SUCCESS) {
         // Telecom manages audio route for us
         listener.onUpgradedToVideo(false /* switchToSpeaker */);
       } else {
@@ -125,9 +218,14 @@ public class ImsVideoCallCallback extends VideoCall.Callback {
     } else if (videoTech.getSessionModificationState()
         == SessionModificationState.RECEIVED_UPGRADE_TO_VIDEO_REQUEST) {
       videoTech.setSessionModificationState(SessionModificationState.NO_REQUEST);
+    /// M: move handel logic to WAITING_FOR_UPGRADE_TO_VIDEO_RESPONSE.@{
+    /// Google original code:
+    /*
     } else if (videoTech.getSessionModificationState()
         == SessionModificationState.WAITING_FOR_RESPONSE) {
       videoTech.setSessionModificationState(getSessionModificationStateFromTelecomStatus(status));
+    */
+    ///@}
     } else {
       LogUtil.i(
           "ImsVideoCallCallback.onSessionModifyResponseReceived",
@@ -183,10 +281,18 @@ public class ImsVideoCallCallback extends VideoCall.Callback {
       case Connection.VideoProvider.SESSION_EVENT_CAMERA_READY:
         LogUtil.i("ImsVideoCallCallback.onCallSessionEvent", "camera_ready");
         break;
+      case VideoSessionController.SESSION_EVENT_NOTIFY_START_TIMER_20S:
+        LogUtil.i("ImsVideoCallCallback.onCallSessionEvent", "start_cancel_timer");
+        break;
       default:
         LogUtil.i("ImsVideoCallCallback.onCallSessionEvent", "unknown event = : " + event);
         break;
     }
+    /// M: handle special event, e.g camera error.
+    listener.onCallSessionEvent(event);
+    /// M: for plugin extension:OP09. @{
+    ExtensionManager.getVideoCallExt().onCallSessionEvent(listener, event);
+    /// @}
   }
 
   @Override
@@ -202,6 +308,8 @@ public class ImsVideoCallCallback extends VideoCall.Callback {
   @Override
   public void onCallDataUsageChanged(long dataUsage) {
     LogUtil.i("ImsVideoCallCallback.onCallDataUsageChanged", "dataUsage: %d", dataUsage);
+    /// M: add for VideoDebugInfo.
+    listener.onCallDataUsageChanged(dataUsage);
   }
 
   @Override

@@ -45,6 +45,7 @@ import com.android.contacts.common.compat.PhoneAccountCompat;
 import com.android.contacts.common.compat.PhoneNumberUtilsCompat;
 import java.util.ArrayList;
 import java.util.List;
+import com.android.dialer.common.LogUtil;
 
 /**
  * Dialog that allows the user to select a phone accounts for a given action. Optionally provides
@@ -184,6 +185,11 @@ public class SelectPhoneAccountDialogFragment extends DialogFragment {
       dialog.getListView().addFooterView(checkboxLayout);
     }
 
+
+    /// M: Record account dialog to dimiss it in some cases. @{
+    mAlertDialog = dialog;
+    /// @}
+
     return dialog;
   }
 
@@ -196,6 +202,27 @@ public class SelectPhoneAccountDialogFragment extends DialogFragment {
     }
     super.onCancel(dialog);
   }
+
+  /// M: when stop, dimiss the dialog @{
+  @Override
+  public void onStop() {
+    // ALPS03564475 Check to see whether this activity is in process of being destroyed
+    // in order to be recreated with a new configuration.
+    // If recreate activiy, do not need to dismiss phone account and disconnect call.
+    boolean isChanging = false;
+    if (getActivity() != null) {
+      isChanging = getActivity().isChangingConfigurations();
+      LogUtil.d("SelectPhoneAccountDialogFragment.onStop", "isChanging: " + isChanging);
+    }
+    if (!mIsSelected && mListener != null && !isChanging) {
+      Bundle result = new Bundle();
+      result.putString(SelectPhoneAccountListener.EXTRA_CALL_ID, getCallId());
+      mListener.onReceiveResult(SelectPhoneAccountListener.RESULT_DISMISSED, result);
+      dismissAllowingStateLoss();
+    }
+    super.onStop();
+  }
+  /// @}
 
   @Nullable
   private String getCallId() {
@@ -267,7 +294,15 @@ public class SelectPhoneAccountDialogFragment extends DialogFragment {
       PhoneAccountHandle accountHandle = getItem(position);
       PhoneAccount account =
           getContext().getSystemService(TelecomManager.class).getPhoneAccount(accountHandle);
+
       if (account == null) {
+        /// M: Record account dialog to dimiss it when account not exists. @{
+        LogUtil.i("SelectAccountListAdapter.getView ", "PhoneAccountHandle = " + accountHandle);
+        if (mAlertDialog != null) {
+          LogUtil.d("SelectAccountListAdapter.getView ", "dismiss current dialog.");
+          mAlertDialog.dismiss();
+        }
+        /// @}
         return rowView;
       }
       holder.labelTextView.setText(account.getLabel());
@@ -292,4 +327,10 @@ public class SelectPhoneAccountDialogFragment extends DialogFragment {
       ImageView imageView;
     }
   }
+
+
+  ///-------------------------------------- Mediatek -----------------------------------------
+  /// M: Record account dialog to dimiss it in some cases. @{
+  private static AlertDialog mAlertDialog;
+  /// @}
 }

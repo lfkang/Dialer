@@ -35,6 +35,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import mediatek.telecom.MtkTelecomManager;
 
 /**
  * Performs permission checks before calling into TelecomManager. Each method is self-explanatory -
@@ -155,15 +156,26 @@ public abstract class TelecomUtil {
     if (TextUtils.isEmpty(number)) {
       return false;
     }
-    Pair<PhoneAccountHandle, String> cacheKey = new Pair<>(accountHandle, number);
-    if (isVoicemailNumberCache.containsKey(cacheKey)) {
-      return isVoicemailNumberCache.get(cacheKey);
-    }
+
+    /// M: ALPS03542874, always check voice mail number every time.
+    // Or else will get incorrect result after voice mail number changed. @{
+    /**
+      * Google code:
+        Pair<PhoneAccountHandle, String> cacheKey = new Pair<>(accountHandle, number);
+        if (isVoicemailNumberCache.containsKey(cacheKey)) {
+          return isVoicemailNumberCache.get(cacheKey);
+        }
+      */
+    /// @}
     boolean result = false;
     if (hasReadPhoneStatePermission(context)) {
       result = getTelecomManager(context).isVoiceMailNumber(accountHandle, number);
     }
-    isVoicemailNumberCache.put(cacheKey, result);
+
+    /**
+      * Google code:
+        isVoicemailNumberCache.put(cacheKey, result);
+      */
     return result;
   }
 
@@ -234,7 +246,10 @@ public abstract class TelecomUtil {
 
     public boolean isInCall(Context context) {
       if (hasReadPhoneStatePermission(context)) {
-        return getTelecomManager(context).isInCall();
+        //return getTelecomManager(context).isInCall();
+        ///M: Modify for ALPS03531840, change isInCall API and using
+        // MTK API instead
+        return MtkTelecomManager.getInstance().isInCall(context);
       }
       return false;
     }

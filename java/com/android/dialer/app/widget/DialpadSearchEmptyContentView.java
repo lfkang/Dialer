@@ -19,6 +19,8 @@ package com.android.dialer.app.widget;
 import android.content.Context;
 import android.view.LayoutInflater;
 import android.widget.LinearLayout;
+import android.widget.LinearLayout.LayoutParams;
+
 import com.android.dialer.app.R;
 import com.android.dialer.util.OrientationUtil;
 import com.android.dialer.widget.EmptyContentView;
@@ -40,5 +42,12 @@ public class DialpadSearchEmptyContentView extends EmptyContentView {
     final LayoutInflater inflater =
         (LayoutInflater) getContext().getSystemService(Context.LAYOUT_INFLATER_SERVICE);
     inflater.inflate(R.layout.empty_content_view_dialpad_search, this);
+    ///M: Smart search's empty view can not be shown completely when dialpad fragment is hide. @{
+    if (!OrientationUtil.isLandscape(getContext())) {
+      LayoutParams layoutParam = new LayoutParams(LayoutParams.MATCH_PARENT,
+          LayoutParams.WRAP_CONTENT);
+      setLayoutParams(layoutParam);
+    }
+    ///M: @}
   }
 }

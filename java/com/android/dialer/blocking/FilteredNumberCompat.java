@@ -39,6 +39,7 @@ import com.android.dialer.database.FilteredNumberContract.FilteredNumberColumns;
 import com.android.dialer.database.FilteredNumberContract.FilteredNumberSources;
 import com.android.dialer.database.FilteredNumberContract.FilteredNumberTypes;
 import com.android.dialer.telecom.TelecomUtil;
+import com.mediatek.dialer.ext.ExtensionManager;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -199,11 +200,14 @@ public class FilteredNumberCompat {
       Context context, String number, @Nullable String e164Number, @Nullable String countryIso) {
     ContentValues contentValues = new ContentValues();
     contentValues.put(getOriginalNumberColumnName(context), Objects.requireNonNull(number));
+    ///M: new filtering also need e164number. so pass e164 format number to provider
+    // to avoid countryIso inconsistent problem.@{
+    if (e164Number == null) {
+      e164Number = PhoneNumberUtils.formatNumberToE164(number, countryIso);
+    }
+    contentValues.put(getE164NumberColumnName(context), e164Number);
+    ///@}
     if (!useNewFiltering(context)) {
-      if (e164Number == null) {
-        e164Number = PhoneNumberUtils.formatNumberToE164(number, countryIso);
-      }
-      contentValues.put(getE164NumberColumnName(context), e164Number);
       contentValues.put(getCountryIsoColumnName(context), countryIso);
       contentValues.put(getTypeColumnName(context), FilteredNumberTypes.BLOCKED_NUMBER);
       contentValues.put(getSourceColumnName(context), FilteredNumberSources.USER);
@@ -260,6 +264,13 @@ public class FilteredNumberCompat {
    * @return {@code true} if the app and user can block numbers, {@code false} otherwise.
    */
   public static boolean canAttemptBlockOperations(Context context) {
+    /// M: For OP01, do not use BlockedNumberProvider @{
+    if (!ExtensionManager.getDialerUtilsExtension()
+            .shouldUseBlockedNumberFeature()) {
+        return false;
+    }
+    /// @}
+
     if (canAttemptBlockOperationsForTest != null) {
       return canAttemptBlockOperationsForTest;
     }
@@ -270,7 +281,7 @@ public class FilteredNumberCompat {
     }
 
     // Great Wall blocking, must be primary user and the default or system dialer
-    // TODO: check that we're the system Dialer
+    // TODO(maxwelb): check that we're the system Dialer
     return TelecomUtil.isDefaultDialer(context)
         && safeBlockedNumbersContractCanCurrentUserBlockNumbers(context);
   }

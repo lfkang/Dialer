@@ -92,7 +92,7 @@ public class VoicemailErrorManager implements CallLogQueryHandler.Listener, Voic
       }
     }
     alertItem.updateStatus(statuses, this);
-    // TODO: b/30668323 support error from multiple sources.
+    // TODO(twyen): b/30668323 support error from multiple sources.
     return;
   }
 
@@ -186,4 +186,11 @@ public class VoicemailErrorManager implements CallLogQueryHandler.Listener, Voic
       fetchStatus();
     }
   }
+
+  /// M: [Multi-Delete] For CallLog delete @{
+  @Override
+  public void onCallsDeleted() {
+    // Do nothing
+  }
+  /// @}
 }

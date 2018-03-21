@@ -47,4 +47,7 @@ public interface InCallButtonUi {
   Fragment getInCallButtonUiFragment();
 
   void showAudioRouteSelector();
+
+  /// M: [Voice Record]
+  void updateRecordStateUi(boolean isRecording);
 }

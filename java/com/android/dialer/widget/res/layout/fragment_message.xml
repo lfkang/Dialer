@@ -22,11 +22,12 @@
   android:gravity="bottom"
   android:background="@color/background_dialer_white">
 
-  <LinearLayout
-    android:id="@+id/message_container"
-    android:orientation="vertical"
-    android:layout_width="match_parent"
-    android:layout_height="wrap_content"/>
+
+    <LinearLayout
+      android:id="@+id/message_container"
+      android:orientation="vertical"
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"/>
 
   <View
     android:layout_width="match_parent"

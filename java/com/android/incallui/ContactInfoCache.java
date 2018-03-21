@@ -60,6 +60,11 @@ import com.android.incallui.ContactsAsyncHelper.OnImageLoadCompleteListener;
 import com.android.incallui.bindings.PhoneNumberService;
 import com.android.incallui.call.DialerCall;
 import com.android.incallui.incall.protocol.ContactPhotoType;
+import com.mediatek.incallui.CallDetailChangeHandler;
+import com.mediatek.incallui.CallDetailChangeHandler.CallDetailChangeListener;
+
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -125,6 +130,10 @@ public class ContactInfoCache implements OnImageLoadCompleteListener {
   private ContactInfoCache(Context context) {
     mContext = context;
     mPhoneNumberService = Bindings.get(context).newPhoneNumberService(context);
+    /// M: For volte @{
+    CallDetailChangeHandler.getInstance()
+            .addCallDetailChangeListener(mCallDetailChangeListener);
+    /// @}
   }
 
   public static synchronized ContactInfoCache getInstance(Context mContext) {
@@ -293,7 +302,7 @@ public class ContactInfoCache implements OnImageLoadCompleteListener {
     return name;
   }
 
-  ContactCacheEntry getInfo(String callId) {
+  public ContactCacheEntry getInfo(String callId) {
     return mInfoMap.get(callId);
   }
 
@@ -646,7 +655,11 @@ public class ContactInfoCache implements OnImageLoadCompleteListener {
   @MainThread
   private void sendInfoNotifications(String callId, ContactCacheEntry entry) {
     Assert.isMainThread();
-    final Set<ContactInfoCacheCallback> callBacks = mCallBacks.get(callId);
+    /// M: ALPS03595584, mCallBacks was modified by a new query. @{
+    //final Set<ContactInfoCacheCallback> callBacks = mCallBacks.get(callId);
+    final Set<ContactInfoCacheCallback> callBacks =
+                    new ArraySet<ContactInfoCacheCallback>(mCallBacks.get(callId));
+    /// @}
     if (callBacks != null) {
       for (ContactInfoCacheCallback callBack : callBacks) {
         callBack.onContactInfoComplete(callId, entry);
@@ -657,7 +670,16 @@ public class ContactInfoCache implements OnImageLoadCompleteListener {
   @MainThread
   private void sendImageNotifications(String callId, ContactCacheEntry entry) {
     Assert.isMainThread();
-    final Set<ContactInfoCacheCallback> callBacks = mCallBacks.get(callId);
+    /// M: ALPS03595584, mCallBacks was modified by a new query. @{
+    //final Set<ContactInfoCacheCallback> callBacks = mCallBacks.get(callId);
+    if (entry == null) {
+        Log.i(TAG, "sendImageNotifications() with null entry, return");
+        return;
+    }
+    final Set<ContactInfoCacheCallback> callBacks =
+                    new ArraySet<ContactInfoCacheCallback>(mCallBacks.get(callId));
+    /// @}
+
     if (callBacks != null && entry.photo != null) {
       for (ContactInfoCacheCallback callBack : callBacks) {
         callBack.onImageLoadComplete(callId, entry);
@@ -935,6 +957,14 @@ public class ContactInfoCache implements OnImageLoadCompleteListener {
       Log.d(TAG, "needForceQuery: first query");
       return true;
     }
+
+    /// M: Ignore query because number presentation is not allowed @{
+    if (call.getNumberPresentation() != TelecomManager.PRESENTATION_ALLOWED) {
+      Log.d(TAG, "needForceQuery: Presentation not allowed");
+      return false;
+    }
+    /// @}
+
     String oldPhoneNumber = PhoneNumberUtils.stripSeparators(cacheEntry.originalPhoneNumber);
 
     if (!TextUtils.equals(oldPhoneNumber, newPhoneNumber)) {
@@ -968,5 +998,131 @@ public class ContactInfoCache implements OnImageLoadCompleteListener {
       Log.d(TAG, "waitingQueryId = " + waitingQueryId + "; queryId = " + queryId);
       return waitingQueryId == queryId;
     }
+  }
+
+  /// -----------------------------------Mediatek------------------------------------
+  /// M: For volte @{
+  /**
+   * M: listener, which will get notified onContactInfoUpdated() when re-query of certain
+   *  call complete.
+   */
+  public static abstract class ContactInfoUpdatedListener {
+      public void onContactInfoUpdated(String callId) {}
+  }
+
+  /**
+   * M: restore all ContactInfoUpdatedListener, who will get notified later.
+   */
+  private final List<ContactInfoUpdatedListener> mContactInfoUpdatedListener
+          = new ArrayList<ContactInfoUpdatedListener>();
+
+  /**
+   * M: add ContactInfoUpdatedListener.
+   * @param listener
+   */
+  public void addContactInfoUpdatedListener(ContactInfoUpdatedListener listener) {
+      if (!mContactInfoUpdatedListener.contains(listener)) {
+          mContactInfoUpdatedListener.add(listener);
+      }
+  }
+
+  /**
+   * M: remove ContactInfoUpdatedListener.
+   * @param listener
+   */
+  public void removeContactInfoUpdatedListener(ContactInfoUpdatedListener listener) {
+      if (mContactInfoUpdatedListener.contains(listener)) {
+          mContactInfoUpdatedListener.remove(listener);
+      }
+  }
+
+  /**
+   * M: listen onVolteMarkedEccChanged() and onPhoneNumberChanged() from CallDetailsChangeHandler.
+   */
+  private final CallDetailChangeListener mCallDetailChangeListener
+          = new CallDetailChangeListener() {
+
+      public void onVolteMarkedEccChanged(DialerCall call) {
+          handleIsEmergencyChanged(call);
+      }
+
+      public void onPhoneNumberChanged(DialerCall call) {
+          handlePhoneNumberChanged(call);
+      }
+  };
+
+  /**
+   * M: When certain call is marked as Ecc by NW, notify listners.
+   * @param call
+   */
+  private void handleIsEmergencyChanged(DialerCall call) {
+      Log.d(TAG, "handleIsEmergencyChanged()... call = " + call);
+      // check whether it is a ecc call again
+      if (call != null && call.isVolteMarkedEcc()) {
+          final String callId = call.getId();
+          final ContactCacheEntry cacheEntry = mInfoMap.get(callId);
+          final boolean isIncoming = call.getState() == DialerCall.State.INCOMING;
+          Set<ContactInfoCacheCallback> callBacks = mCallBacks.get(callId);
+
+          if (cacheEntry != null && callBacks != null) {
+              // query is still running, remove callbacks
+              clearCallbacks(callId);
+          }
+          CallerInfo callerInfo = new CallerInfo().markAsEmergency(mContext);
+          final CallerInfoQueryToken queryToken = new CallerInfoQueryToken(mQueryId, callId);
+          mQueryId++;
+          if (cacheEntry != null) {
+            // We should not override the old cache item until the new query is
+            // back. We should only update the queryId. Otherwise, we may see
+            // flicker of the name and image (old cache -> new cache before query
+            // -> new cache after query)
+            cacheEntry.queryId = queryToken.mQueryId;
+            Log.d(TAG, "There is an existing cache. Do not override until new query is back");
+          } else {
+            ContactCacheEntry initialCacheEntry =
+                updateCallerInfoInCacheOnAnyThread(
+                    callId, call.getNumberPresentation(), callerInfo,
+                    false, queryToken);
+            sendInfoNotifications(callId, initialCacheEntry);
+          }
+          // make EntryCache complete into mInCfoMap, notify CallCardPresenter to get it again.
+          for (ContactInfoUpdatedListener listener : mContactInfoUpdatedListener) {
+              listener.onContactInfoUpdated(callId);
+          }
+      }
+  }
+
+  /**
+   * M: when number of certain call changed, re-query for it.
+   * when re-query complete, will notify all listeners to trigger them to get new ContactInfo
+   * from here.
+   * @param call
+   */
+  private void handlePhoneNumberChanged(DialerCall call) {
+      Log.d(TAG, "handlePhoneNumberChanged()... call = " + call);
+      if (call != null && !call.isVolteMarkedEcc()) {
+      findInfo(call, call.getState() == DialerCall.State.INCOMING,
+          new ContactInfoCacheCallback() {
+            @Override
+            public void onContactInfoComplete(String callId,
+                ContactCacheEntry entry) {
+              // re-query complete, notify users to re-get new
+              // ContactCacheEntry.
+              for (ContactInfoUpdatedListener listener : mContactInfoUpdatedListener) {
+                listener.onContactInfoUpdated(callId);
+              }
+            }
+
+            @Override
+            public void onImageLoadComplete(String callId,
+                ContactCacheEntry entry) {
+              // re-query complete, notify users to re-get new
+              // ContactCacheEntry.
+              for (ContactInfoUpdatedListener listener : mContactInfoUpdatedListener) {
+                listener.onContactInfoUpdated(callId);
+              }
+            }
+          });
+      }
   }
 }

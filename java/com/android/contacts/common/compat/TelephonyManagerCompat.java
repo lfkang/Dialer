@@ -25,6 +25,7 @@ import android.support.annotation.Nullable;
 import android.support.v4.os.BuildCompat;
 import android.telecom.PhoneAccountHandle;
 import android.telephony.TelephonyManager;
+import android.widget.Toast;
 import com.android.dialer.common.Assert;
 import com.android.dialer.common.LogUtil;
 import com.android.dialer.telecom.TelecomUtil;
@@ -172,7 +173,18 @@ public class TelephonyManagerCompat {
             "not default dialer, cannot send special code");
         return;
       }
-      context.getSystemService(TelephonyManager.class).sendDialerSpecialCode(secretCode);
+      try {
+        context.getSystemService(TelephonyManager.class).sendDialerSpecialCode(secretCode);
+      } catch (IllegalStateException e) {
+        ///M: Add this code to catch NullPointerException from TelephonyManager
+        // if telephony is not ready, when enter secred code to enter EM, it will JE
+        // add this catch to avoid JE occur.
+        LogUtil.e(
+            "TelephonyManagerCompat.handleSecretCode",
+            "sendDialerSpecialCode throw NullPointerException");
+        Toast.makeText
+            (context, "Cannot enter EM because telephony is not ready", Toast.LENGTH_SHORT).show();
+      }
     } else {
       // System service call is not supported pre-O, so must use a broadcast for N-.
       Intent intent =

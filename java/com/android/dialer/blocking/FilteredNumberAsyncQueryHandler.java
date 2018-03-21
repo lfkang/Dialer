@@ -88,7 +88,8 @@ public class FilteredNumberAsyncQueryHandler extends AsyncQueryHandler {
     }
   }
 
-  void hasBlockedNumbers(final OnHasBlockedNumbersListener listener) {
+  /**add public for test case*/
+  public void hasBlockedNumbers(final OnHasBlockedNumbersListener listener) {
     if (!FilteredNumberCompat.canAttemptBlockOperations(context)) {
       listener.onHasBlockedNumbers(false);
       return;
@@ -262,7 +263,7 @@ public class FilteredNumberAsyncQueryHandler extends AsyncQueryHandler {
   }
 
   /*
-   * TODO: b/27779827, non-e164 numbers can be blocked in the new form of blocking. As a
+   * TODO(maxwelb): b/27779827, non-e164 numbers can be blocked in the new form of blocking. As a
    * temporary workaround, determine which column of the database to query based on whether the
    * number is e164 or not.
    */
@@ -348,10 +349,14 @@ public class FilteredNumberAsyncQueryHandler extends AsyncQueryHandler {
         new Listener() {
           @Override
           public void onQueryComplete(int token, Object cookie, Cursor cursor) {
-            int rowsReturned = cursor == null ? 0 : cursor.getCount();
+            /*int rowsReturned = cursor == null ? 0 : cursor.getCount();
             if (rowsReturned != 1) {
               throw new SQLiteDatabaseCorruptException(
                   "Returned " + rowsReturned + " rows for uri " + uri + "where 1 expected.");
+                    }*/
+
+            if (cursor == null || cursor.getCount() <= 0) {
+              return;
             }
             cursor.moveToFirst();
             final ContentValues values = new ContentValues();

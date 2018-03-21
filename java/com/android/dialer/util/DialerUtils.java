@@ -15,6 +15,7 @@
  */
 package com.android.dialer.util;
 
+import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.ActivityNotFoundException;
 import android.content.Context;
@@ -26,6 +27,8 @@ import android.graphics.Point;
 import android.os.Build.VERSION;
 import android.os.Build.VERSION_CODES;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.preference.PreferenceManager;
 import android.support.annotation.NonNull;
 import android.support.v4.content.ContextCompat;
@@ -39,6 +42,7 @@ import android.widget.Toast;
 import com.android.dialer.common.Assert;
 import com.android.dialer.common.LogUtil;
 import com.android.dialer.telecom.TelecomUtil;
+import com.mediatek.dialer.ext.ExtensionManager;
 import java.io.File;
 import java.util.Iterator;
 import java.util.Random;
@@ -64,6 +68,10 @@ public class DialerUtils {
    * @param intent to start the activity with.
    */
   public static void startActivityWithErrorToast(Context context, Intent intent) {
+    ///M: Plug-in Call to Enable Video call from Call Settings through pop-up if it is disabled
+    if (ExtensionManager.getDialPadExtension().checkVideoSetting(context, intent)) {
+        return;
+    }
     startActivityWithErrorToast(context, intent, R.string.activity_not_available);
   }
 
@@ -243,4 +251,41 @@ public class DialerUtils {
     return PreferenceManager.getDefaultSharedPreferences(
         deviceProtectedContext != null ? deviceProtectedContext : context);
   }
+
+  /**
+   * M: Attempts to start an activity for result and displays a toast with the
+   * default error message if the activity is not found, instead of throwing an
+   * exception.
+   *
+   * @param activity to start the activity with.
+   * @param intent to start the activity with.
+   * @param requestCode the request code
+   */
+  public static void startActivityForResultWithErrorToast(Activity activity, Intent intent,
+      int requestCode) {
+    try {
+      activity.startActivityForResult(intent, requestCode);
+    } catch (ActivityNotFoundException e) {
+      Toast.makeText(activity, R.string.activity_not_available, Toast.LENGTH_SHORT).show();
+    }
+  }
+
+
+  /**
+   * M: Disable view's clickable in given duration.
+   * @param view  the view will be disabled clickable
+   * @param duration the duration time. after the time, resume view's clickable
+   */
+  public static void disableViewClickableInDuration(View view, long duration) {
+      view.setClickable(false);
+      LogUtil.i("ContactsFragment.disableViewClickableInDuration",
+          "view = " + view + ", for : " + duration);
+      new Handler(Looper.getMainLooper()).postDelayed(new Runnable() {
+        @Override
+        public void run() {
+          view.setClickable(true);
+          LogUtil.i("ContactsFragment.disableViewClickableInDuration", "resume clickable: " + view);
+        }
+      }, duration);
+    }
 }

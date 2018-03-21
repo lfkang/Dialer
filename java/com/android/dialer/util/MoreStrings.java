@@ -16,6 +16,7 @@
 
 package com.android.dialer.util;
 
+import android.os.Build;
 import android.support.annotation.Nullable;
 import android.text.TextUtils;
 
@@ -51,6 +52,11 @@ public class MoreStrings {
     // Do exactly same thing as Uri#toSafeString() does, which will enable us to compare
     // sanitized phone numbers.
     final StringBuilder builder = new StringBuilder();
+    /// M: log enhancement for eng or user debug load. @{
+    if (!("user".equals(Build.TYPE))) {
+        return value;
+    }
+    /// @}
     for (int i = 0; i < value.length(); i++) {
       final char c = value.charAt(i);
       if (c == '-' || c == '@' || c == '.') {

@@ -155,4 +155,12 @@ public class LightbringerTech implements VideoTech, LightbringerListener {
   public void onLightbringerStateChanged() {
     listener.onVideoTechStateChanged();
   }
+
+  @Override
+  public void downgradeToAudio() {
+  }
+
+  @Override
+  public void cancelUpgradeVideoRequest() {
+  }
 }

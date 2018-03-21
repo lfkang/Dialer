@@ -26,11 +26,14 @@ import android.support.v7.widget.RecyclerView;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
+
+import com.android.dialer.common.LogUtil;
 import com.android.contacts.common.ContactPhotoManager;
 import com.android.contacts.common.lettertiles.LetterTileDrawable;
 import com.android.dialer.common.Assert;
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
+import java.util.Arrays;
 
 /** List adapter for the union of all contacts associated with every account on the device. */
 final class ContactsAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
@@ -59,6 +62,9 @@ final class ContactsAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder
     this.cursor = cursor;
     headers = cursor.getExtras().getStringArray(Contacts.EXTRA_ADDRESS_BOOK_INDEX_TITLES);
     counts = cursor.getExtras().getIntArray(Contacts.EXTRA_ADDRESS_BOOK_INDEX_COUNTS);
+    ///M: when contacts data changed(maybe contact display_photo changed), set refresh flag.
+    ///   If not set refresh flag, ContactPhotoManager will still use the old bitmap in cached.
+    ContactPhotoManager.getInstance(context).refreshCache();
   }
 
   @Override
@@ -91,7 +97,10 @@ final class ContactsAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder
     String name = getDisplayName(cursor);
     String header = getHeaderString(position);
     Uri contactUri = getContactUri(cursor);
+    int subId = cursor.getInt(ContactsCursorLoader.CONTACT_INDICATE_PHONE_SIM);
+    int isSdnContacts = cursor.getInt(ContactsCursorLoader.CONTACT_IS_SDN_CONTACT);
 
+    /// M:[MTK SIM Contacts feature]if this contact is SIM contact,call log need show SIM icon
     ContactPhotoManager.getInstance(context)
         .loadDialerThumbnailOrPhoto(
             contactViewHolder.getPhoto(),
@@ -99,7 +108,10 @@ final class ContactsAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder
             getPhotoId(cursor),
             getPhotoUri(cursor),
             name,
-            LetterTileDrawable.TYPE_DEFAULT);
+            LetterTileDrawable.TYPE_DEFAULT,
+            subId,     ///M:[MTK SIM Contacts feature]
+            isSdnContacts    ///M:[MTK SIM Contacts feature]
+            );
 
     String photoDescription =
         context.getString(com.android.contacts.common.R.string.description_quick_contact_for, name);
@@ -168,6 +180,24 @@ final class ContactsAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder
     int index = -1;
     int sum = 0;
     while (sum <= position) {
+      ///M: TODO There is a ArrayIndexOutofBoundsException about counts[++index]. Have not found
+      // the root cause now. So add a protection to avoid Exception. need to remove it after found
+      // the root cause. @{
+      if ((index + 1) >= counts.length) {
+        int total = 0;
+        for (int c : counts) {
+          total += c;
+        }
+        LogUtil.e("ContactsAdapter.getHeaderString", "headers=" + Arrays.toString(headers) +
+            " \n counts=" + Arrays.toString(counts) + " \n SUM of counts = " + total +
+            "cursor count = " + cursor.getCount());
+        if (index >= 0) {
+          return headers[index];
+        } else {
+          return "";
+        }
+      }
+      ///M: @}
       sum += counts[++index];
     }
     return headers[index];

@@ -20,6 +20,13 @@ import android.content.Context;
 import android.content.CursorLoader;
 import android.provider.ContactsContract.Contacts;
 
+import com.mediatek.dialer.util.DialerFeatureOptions;
+import com.mediatek.provider.MtkContactsContract.ContactsColumns;
+
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+
 /** Cursor Loader for {@link ContactsFragment}. */
 final class ContactsCursorLoader extends CursorLoader {
 
@@ -29,7 +36,11 @@ final class ContactsCursorLoader extends CursorLoader {
   public static final int CONTACT_PHOTO_URI = 3;
   public static final int CONTACT_LOOKUP_KEY = 4;
 
-  public static final String[] CONTACTS_PROJECTION_DISPLAY_NAME_PRIMARY =
+  /// M:[portable][MTK SIM Contacts feature] @{
+  public static final int CONTACT_INDICATE_PHONE_SIM = 5;
+  public static final int CONTACT_IS_SDN_CONTACT = 6;
+
+  public static /*final*/ String[] CONTACTS_PROJECTION_DISPLAY_NAME_PRIMARY =
       new String[] {
         Contacts._ID, // 0
         Contacts.DISPLAY_NAME_PRIMARY, // 1
@@ -38,7 +49,20 @@ final class ContactsCursorLoader extends CursorLoader {
         Contacts.LOOKUP_KEY, // 4
       };
 
-  public static final String[] CONTACTS_PROJECTION_DISPLAY_NAME_ALTERNATIVE =
+    /// M:[portable][MTK SIM Contacts feature] @{
+  static {
+    List<String> projectionList = new ArrayList<>(
+        Arrays.asList(CONTACTS_PROJECTION_DISPLAY_NAME_PRIMARY));
+        if (DialerFeatureOptions.isSimContactsSupport()) {
+            projectionList.add(ContactsColumns.INDICATE_PHONE_SIM);   //5
+            projectionList.add(ContactsColumns.IS_SDN_CONTACT);   //6
+        }
+    CONTACTS_PROJECTION_DISPLAY_NAME_PRIMARY = projectionList
+        .toArray(new String[projectionList.size()]);
+  }
+  /// @}
+
+  public static /*final*/ String[] CONTACTS_PROJECTION_DISPLAY_NAME_ALTERNATIVE =
       new String[] {
         Contacts._ID, // 0
         Contacts.DISPLAY_NAME_ALTERNATIVE, // 1
@@ -46,6 +70,20 @@ final class ContactsCursorLoader extends CursorLoader {
         Contacts.PHOTO_THUMBNAIL_URI, // 3
         Contacts.LOOKUP_KEY, // 4
       };
+
+    /// M:[portable][MTK SIM Contacts feature] @{
+  static {
+    List<String> projectionList = new ArrayList<>(
+        Arrays.asList(CONTACTS_PROJECTION_DISPLAY_NAME_ALTERNATIVE));
+         if (DialerFeatureOptions.isSimContactsSupport()) {
+                 projectionList.add(ContactsColumns.INDICATE_PHONE_SIM);   //5
+                 projectionList.add(ContactsColumns.IS_SDN_CONTACT);   //6
+        }
+    CONTACTS_PROJECTION_DISPLAY_NAME_ALTERNATIVE = projectionList
+        .toArray(new String[projectionList.size()]);
+  }
+  /// @}
+
 
   private ContactsCursorLoader(Context context, String[] contactProjection, String sortKey) {
     super(

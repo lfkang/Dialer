@@ -15,9 +15,18 @@
  */
 
 package com.android.dialer.calllogutils;
-
+import android.content.Context;
 import android.content.res.Resources;
+import android.os.PersistableBundle;
+import android.telephony.CarrierConfigManager;
+import android.telephony.SubscriptionManager;
+import android.util.Log;
+
+import com.android.dialer.app.calllog.CallLogActivity;
+import com.android.dialer.binary.common.DialerApplication;
 import com.android.dialer.compat.AppCompatConstants;
+
+import mediatek.telephony.MtkCarrierConfigManager;
 
 /** Helper class to perform operations related to call types. */
 public class CallTypeHelper {
@@ -50,6 +59,8 @@ public class CallTypeHelper {
   private final CharSequence mBlockedName;
   /** Name used to identify calls which were answered on another device. */
   private final CharSequence mAnsweredElsewhereName;
+  ///M: For customization using carrier config
+  private static boolean mIsSupportCallPull = false;
 
   public CallTypeHelper(Resources resources) {
     // Cache these values so that we do not need to look them up each time.
@@ -67,13 +78,32 @@ public class CallTypeHelper {
     mRejectedName = resources.getString(R.string.type_rejected);
     mBlockedName = resources.getString(R.string.type_blocked);
     mAnsweredElsewhereName = resources.getString(R.string.type_answered_elsewhere);
+
+    ///M: For customization using carrier config
+    CarrierConfigManager configMgr = (CarrierConfigManager) DialerApplication
+            .getContext().getSystemService(Context.CARRIER_CONFIG_SERVICE);
+    PersistableBundle carrierConfig =
+            configMgr.getConfigForSubId(SubscriptionManager.getDefaultVoiceSubscriptionId());
+    if (carrierConfig != null) {
+        mIsSupportCallPull = carrierConfig.getBoolean(
+          MtkCarrierConfigManager.MTK_KEY_DIALER_CALL_PULL_BOOL);
+    }
   }
 
   public static boolean isMissedCallType(int callType) {
+/// M: For operator, to check for call pull @{
+    boolean isCallPulledType = true;
+    if (mIsSupportCallPull) {
+        Log.d("CallTypeHelper", "Call pull supported");
+        isCallPulledType = (callType != CallLogActivity.INCOMING_PULLED_AWAY_TYPE
+                    && callType != CallLogActivity.OUTGOING_PULLED_AWAY_TYPE);
+    }
+        //}@
     return (callType != AppCompatConstants.CALLS_INCOMING_TYPE
         && callType != AppCompatConstants.CALLS_OUTGOING_TYPE
         && callType != AppCompatConstants.CALLS_VOICEMAIL_TYPE
-        && callType != AppCompatConstants.CALLS_ANSWERED_EXTERNALLY_TYPE);
+        && callType != AppCompatConstants.CALLS_ANSWERED_EXTERNALLY_TYPE
+        && isCallPulledType);
   }
 
   /** Returns the text used to represent the given call type. */

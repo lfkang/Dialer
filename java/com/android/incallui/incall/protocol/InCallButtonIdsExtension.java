@@ -54,6 +54,23 @@ public class InCallButtonIdsExtension {
       return "MANAGE_VOICE_CONFERENCE";
     } else if (id == InCallButtonIds.BUTTON_SWITCH_TO_SECONDARY) {
       return "SWITCH_TO_SECONDARY";
+    /// M: [Voice Record]
+    } else if (id == InCallButtonIds.BUTTON_SWITCH_VOICE_RECORD) {
+      return "SWITCH_VOICE_RECORD";
+    /// M: [Hang Up]
+    } else if (id == InCallButtonIds.BUTTON_HANG_UP_ALL) {
+      return "HANG_UP_ALL";
+    } else if (id == InCallButtonIds.BUTTON_HANG_UP_HOLD) {
+      return "HANG_UP_HOLD";
+    /// M: [ECT(blind)]
+    } else if (id == InCallButtonIds.BUTTON_ECT) {
+        return "ECT";
+    } else if (id == InCallButtonIds.BUTTON_BLIND_ECT) {
+        return "BLIND_ECT";
+    } else if (id == InCallButtonIds.BUTTON_CANCEL_UPGRADE) {
+      return "CANCEL_UPGRADE";
+    } else if (id == InCallButtonIds.BUTTON_DEVICE_SWITCH) {
+        return "DEVICE_SWITCH";
     } else {
       return "INVALID_BUTTON: " + id;
     }

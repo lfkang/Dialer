@@ -265,4 +265,25 @@ public class SelfManagedAnswerVideoCallScreen extends StateCallback implements V
       LogUtil.e("CaptureSessionCallback.onConfigureFailed", "failed to configure");
     }
   }
+
+  /// M: ----------- MediaTek features ---------------
+  @Override
+  public void hidePreview(boolean hide) {
+    /// Do nothing
+  }
+
+  @Override
+  public void updateVideoDebugInfo(long dataUsage) {
+    /// Do nothing
+  }
+
+  @Override
+  public int getDialpadContainerResourceId() {
+    return 0;
+  }
+
+  @Override
+  public void onVideoCallScreenDialpadVisibilityChange(boolean isShowing) {
+    /// Do nothing
+  }
 }

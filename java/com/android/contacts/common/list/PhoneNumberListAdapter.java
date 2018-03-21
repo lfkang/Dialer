@@ -51,6 +51,10 @@ import com.android.dialer.enrichedcall.EnrichedCallManager;
 import com.android.dialer.lightbringer.LightbringerComponent;
 import com.android.dialer.location.GeoUtil;
 import com.android.dialer.util.CallUtil;
+import com.mediatek.dialer.ext.ExtensionManager;
+import com.mediatek.dialer.util.DialerFeatureOptions;
+import com.mediatek.dialer.compat.ContactsCompat;
+import com.mediatek.provider.MtkContactsContract.ContactsColumns;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -70,7 +74,8 @@ public class PhoneNumberListAdapter extends ContactEntryListAdapter {
   // A list of extended directories to add to the directories from the database
   private final List<DirectoryPartition> mExtendedDirectories;
   private final CharSequence mUnknownNameText;
-  protected final boolean mIsImsVideoEnabled;
+  ///M: Fix for ALPS03588750, recover O0's logic
+  //protected final boolean mIsImsVideoEnabled;
 
   // Extended directories will have ID's that are higher than any of the id's from the database,
   // so that we can identify them and set them up properly. If no extended directories
@@ -78,6 +83,9 @@ public class PhoneNumberListAdapter extends ContactEntryListAdapter {
   private long mFirstExtendedDirectoryId = Long.MAX_VALUE;
   private boolean mUseCallableUri;
   private Listener mListener;
+
+  protected boolean mIsVideoEnabled;
+  private boolean mIsPresenceEnabled;
 
   public PhoneNumberListAdapter(Context context) {
     super(context);
@@ -87,10 +95,16 @@ public class PhoneNumberListAdapter extends ContactEntryListAdapter {
     mExtendedDirectories =
         PhoneDirectoryExtenderAccessor.get(mContext).getExtendedDirectories(mContext);
 
-    int videoCapabilities = CallUtil.getVideoCallingAvailability(context);
-    mIsImsVideoEnabled =
-        CallUtil.isVideoEnabled(context)
-            && (videoCapabilities & CallUtil.VIDEO_CALLING_PRESENCE) != 0;
+   ///M: Fix for ALPS03588750, recover O0's logic @{
+   // int videoCapabilities = CallUtil.getVideoCallingAvailability(context);
+   // mIsImsVideoEnabled =
+   //     CallUtil.isVideoEnabled(context)
+   //         && (videoCapabilities & CallUtil.VIDEO_CALLING_PRESENCE) != 0;
+
+   int videoCapabilities = CallUtil.getVideoCallingAvailability(context);
+   mIsVideoEnabled = (videoCapabilities & CallUtil.VIDEO_CALLING_ENABLED) != 0;
+   mIsPresenceEnabled = (videoCapabilities & CallUtil.VIDEO_CALLING_PRESENCE) != 0;
+   /// @}
   }
 
   @Override
@@ -289,10 +303,13 @@ public class PhoneNumberListAdapter extends ContactEntryListAdapter {
     return contact.build();
   }
 
+  ///M:For [MTK Dialer Search] customization @{
   @Override
-  protected ContactListItemView newView(
+  protected /*ContactListItemView*/View newView(
       Context context, int partition, Cursor cursor, int position, ViewGroup parent) {
-    ContactListItemView view = super.newView(context, partition, cursor, position, parent);
+    ContactListItemView view = (ContactListItemView) super.newView(context, partition, cursor,
+        position, parent);
+    ///@}
     view.setUnknownNameText(mUnknownNameText);
     view.setQuickContactEnabled(isQuickContactEnabled());
     return view;
@@ -306,6 +323,13 @@ public class PhoneNumberListAdapter extends ContactEntryListAdapter {
   protected void bindView(View itemView, int partition, Cursor cursor, int position) {
     super.bindView(itemView, partition, cursor, position);
     ContactListItemView view = (ContactListItemView) itemView;
+    ///M: fix for ALPS03475221
+    //  And add plugin to disable video icon in OP01. @{
+    boolean videoCallingEnabled = ExtensionManager.getDialPadExtension()
+        .isSupportVideoCallIcon(CallUtil.isVideoEnabled(mContext));
+    /// @}
+    view.setSupportVideoCallIcon(videoCallingEnabled);
+    LogUtil.d(TAG, "bindView, videoCallingEnabled = " + videoCallingEnabled);
 
     setHighlight(view, cursor);
 
@@ -367,7 +391,13 @@ public class PhoneNumberListAdapter extends ContactEntryListAdapter {
       final String customLabel = cursor.getString(PhoneQuery.PHONE_LABEL);
 
       // TODO cache
-      label = Phone.getTypeLabel(mContext.getResources(), type, customLabel);
+      ///M: fix issue ALPS03606569. @{
+      if (DialerFeatureOptions.isSimContactsSupport()) {
+        label = ContactsCompat.PhoneCompat.getTypeLabel(mContext, type, customLabel);
+      } else {
+        label = Phone.getTypeLabel(mContext.getResources(), type, customLabel);
+      }
+      /// M: @}
     }
     view.setLabel(label);
     final String text;
@@ -392,11 +422,16 @@ public class PhoneNumberListAdapter extends ContactEntryListAdapter {
       // Determine if carrier presence indicates the number supports video calling.
       int carrierPresence = cursor.getInt(PhoneQuery.CARRIER_PRESENCE);
       boolean isPresent = (carrierPresence & Phone.CARRIER_PRESENCE_VT_CAPABLE) != 0;
-
-      boolean showViewIcon = mIsImsVideoEnabled && isPresent;
-      if (showViewIcon) {
+      ///M: Fix for ALPS03588750, recover O0's logic @{
+      //boolean showViewIcon = mIsImsVideoEnabled && isPresent;
+      //if (showViewIcon) {
+      //  action = ContactListItemView.VIDEO;
+      //}
+      boolean isVideoIconShown = mIsVideoEnabled && (!mIsPresenceEnabled || isPresent);
+      if (isVideoIconShown) {
         action = ContactListItemView.VIDEO;
       }
+      /// @}
     }
 
     if (action == ContactListItemView.NONE
@@ -629,14 +664,26 @@ public class PhoneNumberListAdapter extends ContactEntryListAdapter {
     static {
       final List<String> projectionList =
           new ArrayList<>(Arrays.asList(PROJECTION_PRIMARY_INTERNAL));
-      projectionList.add(Phone.CARRIER_PRESENCE); // 9
+          if (CompatUtils.isNCompatible()) {
+              projectionList.add(Phone.CARRIER_PRESENCE); // 9
+          }
+          if (DialerFeatureOptions.isSimContactsSupport()) {
+              projectionList.add(ContactsColumns.INDICATE_PHONE_SIM);   //10
+              projectionList.add(ContactsColumns.IS_SDN_CONTACT);       //11
+          }
       PROJECTION_PRIMARY = projectionList.toArray(new String[projectionList.size()]);
     }
 
     static {
       final List<String> projectionList =
           new ArrayList<>(Arrays.asList(PROJECTION_ALTERNATIVE_INTERNAL));
-      projectionList.add(Phone.CARRIER_PRESENCE); // 9
+            if (CompatUtils.isNCompatible()) {
+                projectionList.add(Phone.CARRIER_PRESENCE); // 9
+            }
+            if (DialerFeatureOptions.isSimContactsSupport()) {
+                projectionList.add(ContactsColumns.INDICATE_PHONE_SIM);   //10
+                projectionList.add(ContactsColumns.IS_SDN_CONTACT);       //11
+           }
       PROJECTION_ALTERNATIVE = projectionList.toArray(new String[projectionList.size()]);
     }
   }

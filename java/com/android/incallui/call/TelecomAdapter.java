@@ -23,6 +23,12 @@ import android.support.annotation.MainThread;
 import android.support.annotation.VisibleForTesting;
 import android.telecom.InCallService;
 import com.android.dialer.common.LogUtil;
+import com.android.incallui.Log;
+import com.mediatek.incallui.compat.InCallUiCompat;
+import com.mediatek.incallui.hangup.HangupOptions;
+import mediatek.telecom.MtkTelecomHelper;
+
+import java.util.ArrayList;
 import java.util.List;
 
 /** Wrapper around Telecom APIs. */
@@ -166,5 +172,141 @@ public class TelecomAdapter implements InCallServiceListener {
       return mInCallService.canAddCall();
     }
     return false;
+  }
+
+  //---------------------------------MTK--------------------------------------
+  /**
+   * M: Toggle voice recording
+   */
+  public void toggleVoiceRecording(boolean start) {
+      if (mInCallService != null && InCallUiCompat.isMtkTelecomCompat()) {
+          if (start) {
+              mInCallService.doMtkAction(
+                      MtkTelecomHelper.MtkInCallServiceHelper.buildParamsForStartVoiceRecording());
+          } else {
+              mInCallService.doMtkAction(
+                      MtkTelecomHelper.MtkInCallServiceHelper.buildParamsForStopVoiceRecording());
+          }
+      } else {
+          Log.e(this,
+                  "error startVoiceRecording, mInCallService is null or no mtk telecom available!");
+      }
+  }
+
+  /**
+   * M: [Hang Up] Hang up all/hold/active
+   * @param option
+   */
+  public void hangupByOption(@HangupOptions int option) {
+      if (mInCallService != null && InCallUiCompat.isMtkTelecomCompat()) {
+          if (HangupOptions.HANGUP_ALL == option) {
+              mInCallService.doMtkAction(
+                      MtkTelecomHelper.MtkInCallServiceHelper.buildParamsForHangupAll());
+          } else if (HangupOptions.HANGUP_HOLD == option) {
+              mInCallService.doMtkAction(
+                      MtkTelecomHelper.MtkInCallServiceHelper.buildParamsForHangupHold());
+          }
+      } else {
+          Log.e(this,
+                  "error startVoiceRecording, mInCallService is null or no mtk telecom available!");
+      }
+  }
+
+  /*
+   * M: [Volte Conference] For VoLTE invitation
+   * @param conferenceCallId
+   * @param numbers
+   */
+  public void inviteConferenceParticipants(String conferenceCallId, ArrayList<String> numbers) {
+      android.telecom.Call conference = getTelecomCallById(conferenceCallId);
+      if (mInCallService != null && conference != null && InCallUiCompat.isMtkTelecomCompat()) {
+          mInCallService.doMtkAction(
+              MtkTelecomHelper.MtkInCallServiceHelper.buildParamsForInviteConferenceParticipants(
+                  conference.getDetails().getTelecomCallId(), numbers));
+      } else {
+        LogUtil.e("TelecomAdapter.inviteConferenceParticipants", "mInCallService is null");
+      }
+  }
+
+  /**
+   * M: The all incoming calls will be sorted according to user's action,
+   * since there are more than 1 incoming call exist user may touch to switch
+   * any incoming call to the primary screen, the sequence of the incoming call
+   * will be changed.
+   */
+  void setSortedIncomingCallList(ArrayList<String> incomingCallList) {
+    if (mInCallService != null && InCallUiCompat.isMtkTelecomCompat()) {
+      mInCallService.doMtkAction(MtkTelecomHelper.MtkInCallServiceHelper
+          .buildParamsForSetSortedIncomingCallList(incomingCallList));
+    } else {
+      LogUtil.e("TelecomAdapter.setSortedIncomingCallList",
+          "mInCallService is null");
+    }
+  }
+
+  /**
+   * [ECT(blind)]
+   * Blind ECT
+   * @param callId the call transfer from
+   * @param number the number transfer to
+   * @param type
+   */
+  public void blindExplicitCallTransfer(String callId, String number, int type) {
+      if (mInCallService != null && InCallUiCompat.isMtkTelecomCompat()) {
+          mInCallService.doMtkAction(
+                  MtkTelecomHelper.MtkInCallServiceHelper
+                          .buildParamsForBlindOrAssuredEct(callId, number, type));
+      } else {
+          Log.e(this,
+                  "error blindEct, mInCallService is null or no mtk telecom available!");
+      }
+  }
+
+  /**
+   * [ECT(blind)]
+   * ECT
+   * @param callId the call transfer to
+   */
+  public void explicitCallTransfer(String callId) {
+      if (mInCallService != null && InCallUiCompat.isMtkTelecomCompat()) {
+          mInCallService.doMtkAction(
+                  MtkTelecomHelper.MtkInCallServiceHelper
+                          .buildParamsForExplicitCallTransfer(callId));
+      } else {
+          Log.e(this,
+                  "error ect, mInCallService is null or no mtk telecom available!");
+      }
+  }
+
+  /**
+   * [Device Switch]
+   *
+   * @param callId the call transfer to
+   */
+  public void deviceSwitch(String callId, String number, String deviceId) {
+      if (mInCallService != null && InCallUiCompat.isMtkTelecomCompat()) {
+          mInCallService.doMtkAction(
+                  MtkTelecomHelper.MtkInCallServiceHelper
+                          .buildParamsForDeviceSwitch(callId, number, deviceId));
+      } else {
+          Log.e(this,
+                  "error deviceSwitch, mInCallService is null or no mtk telecom available!");
+      }
+  }
+
+  /**
+   * [Device Switch]
+   * Cancel Device Switch
+   * @param callId the call transfer to
+   */
+  public void cancelDeviceSwitch(String callId) {
+      if (mInCallService != null && InCallUiCompat.isMtkTelecomCompat()) {
+          mInCallService.doMtkAction(
+                  MtkTelecomHelper.MtkInCallServiceHelper
+                          .buildParamsForCancelDeviceSwitch(callId));
+      } else {
+          Log.e(this,
+                  "error deviceSwitch, mInCallService is null or no mtk telecom available!");
+      }
   }
 }

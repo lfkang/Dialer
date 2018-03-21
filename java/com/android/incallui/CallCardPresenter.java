@@ -53,6 +53,8 @@ import com.android.dialer.multimedia.MultimediaData;
 import com.android.dialer.oem.MotorolaUtils;
 import com.android.incallui.ContactInfoCache.ContactCacheEntry;
 import com.android.incallui.ContactInfoCache.ContactInfoCacheCallback;
+import com.android.incallui.ContactInfoCache.ContactInfoUpdatedListener;
+import com.android.incallui.InCallPresenter.AutoDeclineTimerListener;
 import com.android.incallui.InCallPresenter.InCallDetailsListener;
 import com.android.incallui.InCallPresenter.InCallEventListener;
 import com.android.incallui.InCallPresenter.InCallState;
@@ -61,6 +63,7 @@ import com.android.incallui.InCallPresenter.IncomingCallListener;
 import com.android.incallui.call.CallList;
 import com.android.incallui.call.DialerCall;
 import com.android.incallui.call.DialerCallListener;
+import com.android.incallui.call.TelecomAdapter;
 import com.android.incallui.calllocation.CallLocation;
 import com.android.incallui.calllocation.CallLocationComponent;
 import com.android.incallui.incall.protocol.ContactPhotoType;
@@ -70,11 +73,17 @@ import com.android.incallui.incall.protocol.PrimaryCallState;
 import com.android.incallui.incall.protocol.PrimaryInfo;
 import com.android.incallui.incall.protocol.SecondaryInfo;
 import com.android.incallui.videotech.utils.SessionModificationState;
+import com.mediatek.incallui.hangup.HangupOptions;
+import com.mediatek.incallui.plugin.ExtensionManager;
+import com.mediatek.incallui.utils.InCallUtils;
+import com.mediatek.incallui.volte.InCallUIVolteUtils;
+
 import java.lang.ref.WeakReference;
 
 /**
  * Controller for the Call Card Fragment. This class listens for changes to InCallState and passes
  * it along to the fragment.
+ * M: [Voice Record] support voice recording
  */
 public class CallCardPresenter
     implements InCallStateListener,
@@ -82,7 +91,8 @@ public class CallCardPresenter
         InCallDetailsListener,
         InCallEventListener,
         InCallScreenDelegate,
-        DialerCallListener {
+        DialerCallListener,
+        /** M: add for auto decline */ AutoDeclineTimerListener {
 
   /**
    * Amount of time to wait before sending an announcement via the accessibility manager. When the
@@ -162,7 +172,11 @@ public class CallCardPresenter
       call.addListener(this);
 
       // start processing lookups right away.
-      if (!call.isConferenceCall()) {
+      if (!call.isConferenceCall()
+          /// M: incoming conference should show the invite number when incoming or waiting @{
+          || isIncomingVolteConference(mPrimary)
+          /// @}
+          ) {
         startContactInfoSearch(call, true, call.getState() == DialerCall.State.INCOMING);
       } else {
         updateContactEntry(null, true);
@@ -188,8 +202,14 @@ public class CallCardPresenter
     // Register for call state changes last
     InCallPresenter.getInstance().addListener(this);
     InCallPresenter.getInstance().addIncomingCallListener(this);
-    InCallPresenter.getInstance().addDetailsListener(this);
+    /// M: improve MO/MT performance @{
+    //InCallPresenter.getInstance().addDetailsListener(this);
+    /// @}
     InCallPresenter.getInstance().addInCallEventListener(this);
+    /// M: For volte @{
+    ContactInfoCache.getInstance(mContext)
+            .addContactInfoUpdatedListener(mContactInfoUpdatedListener);
+    /// @}
     isInCallScreenReady = true;
 
     // Log location impressions
@@ -213,6 +233,8 @@ public class CallCardPresenter
         Logger.get(mContext).logImpression(DialerImpression.Type.EMERGENCY_CANT_GET_LOCATION);
       }
     }
+    /// M: add MediaTek feature.
+    InCallPresenter.getInstance().addAutoDeclineListener(this);
   }
 
   @Override
@@ -225,6 +247,12 @@ public class CallCardPresenter
     InCallPresenter.getInstance().removeIncomingCallListener(this);
     InCallPresenter.getInstance().removeDetailsListener(this);
     InCallPresenter.getInstance().removeInCallEventListener(this);
+    /// M: add MediaTek feature.
+    InCallPresenter.getInstance().removeAutoDeclineListener(this);
+    /// M: For volte @{
+    ContactInfoCache.getInstance(mContext)
+            .removeContactInfoUpdatedListener(mContactInfoUpdatedListener);
+    /// @}
     if (mPrimary != null) {
       mPrimary.removeListener(this);
     }
@@ -255,6 +283,9 @@ public class CallCardPresenter
 
     if (newState == InCallState.INCOMING) {
       primary = callList.getIncomingCall();
+      /// M: DSDA. set secondary call and show it. @{
+      secondary = callList.getSecondaryIncomingCall();
+      /// @}
     } else if (newState == InCallState.PENDING_OUTGOING || newState == InCallState.OUTGOING) {
       primary = callList.getOutgoingCall();
       if (primary == null) {
@@ -282,6 +313,10 @@ public class CallCardPresenter
     DialerCall previousPrimary = mPrimary;
     mPrimary = primary;
 
+    /// M: add for OP09 plugin. @{
+    ExtensionManager.getCallCardExt().onStateChange(mPrimary, mSecondary);
+    /// @}
+
     if (mPrimary != null) {
       InCallPresenter.getInstance().onForegroundCallChanged(mPrimary);
       mInCallScreen.updateInCallScreenColors();
@@ -294,7 +329,11 @@ public class CallCardPresenter
     // Refresh primary call information if either:
     // 1. Primary call changed.
     // 2. The call's ability to manage conference has changed.
-    if (shouldRefreshPrimaryInfo(primaryChanged)) {
+    if (shouldRefreshPrimaryInfo(primaryChanged)
+        /// M: [VoLTE Conference] volte conference incoming call @{
+        || needUpdatePrimaryForVolte(oldState, newState, mPrimary)
+        /// @}
+        ){
       // primary call has changed
       if (previousPrimary != null) {
         previousPrimary.removeListener(this);
@@ -459,7 +498,11 @@ public class CallCardPresenter
                   getCallStateIcon(),
                   getGatewayNumber(),
                   shouldShowCallSubject(mPrimary) ? mPrimary.getCallSubject() : null,
-                  mPrimary.getCallbackNumber(),
+                  /// M: Do not show callback number. @{
+                  // Google code:
+                  // mPrimary.getCallbackNumber(),
+                  "",
+                  /// @}
                   mPrimary.hasProperty(Details.PROPERTY_WIFI),
                   mPrimary.isConferenceCall()
                       && !mPrimary.hasProperty(Details.PROPERTY_GENERIC_CONFERENCE),
@@ -469,7 +512,12 @@ public class CallCardPresenter
                   !TextUtils.isEmpty(mPrimary.getLastForwardedNumber()),
                   shouldShowContactPhoto,
                   mPrimary.getConnectTimeMillis(),
-                  CallerInfoUtils.isVoiceMailNumber(mContext, mPrimary),
+                  /// M: ALPS03567937. Using telecom API to check if is voice mail will cost 30ms once.
+                  // Using api isVoiceMailNumber() in dialercall. @{
+                  // Google code:
+                  // CallerInfoUtils.isVoiceMailNumber(mContext, mPrimary),
+                  mPrimary.isVoiceMailNumber(),
+                  /// @}
                   mPrimary.isRemotelyHeld(),
                   isBusiness,
                   supports2ndCallOnHold()));
@@ -506,7 +554,14 @@ public class CallCardPresenter
     DialerCall firstCall = CallList.getInstance().getActiveOrBackgroundCall();
     DialerCall incomingCall = CallList.getInstance().getIncomingCall();
     if (firstCall != null && incomingCall != null && firstCall != incomingCall) {
-      return incomingCall.can(Details.CAPABILITY_HOLD);
+      ///M: ALPS03538928 when have 1A1W, need hold active call,
+      // should check active call capability. @{
+      /**
+        * Google code
+        return incomingCall.can(Details.CAPABILITY_HOLD);
+        */
+      return firstCall.can(Details.CAPABILITY_HOLD);
+      /// @}
     }
     return true;
   }
@@ -541,7 +596,14 @@ public class CallCardPresenter
 
   private void maybeStartSearch(DialerCall call, boolean isPrimary) {
     // no need to start search for conference calls which show generic info.
-    if (call != null && !call.isConferenceCall()) {
+    /**
+     * M: [VoLTE conference] incoming call still need to search.
+     * google original code:
+       if (call != null && !call.isConferenceCall()) {
+     * @{
+     */
+    if ((call != null && !call.isConferenceCall()) || isIncomingVolteConference(call)) {
+    /** @} */
       startContactInfoSearch(call, isPrimary, call.getState() == DialerCall.State.INCOMING);
     }
   }
@@ -676,7 +738,10 @@ public class CallCardPresenter
       multimediaData = mPrimary.getEnrichedCallSession().getMultimediaData();
     }
 
-    if (mPrimary.isConferenceCall()) {
+    if (mPrimary.isConferenceCall()
+        /// M: incoming conference should show the invite number when incoming or waiting @{
+        && !isIncomingVolteConference(mPrimary)) {
+        /// @}
       LogUtil.v(
           "CallCardPresenter.updatePrimaryDisplayInfo",
           "update primary display info for conference call.");
@@ -884,7 +949,9 @@ public class CallCardPresenter
               mSecondary.getCallProviderLabel(),
               true /* isConference */,
               mSecondary.isVideoCall(),
-              mIsFullscreen));
+              mIsFullscreen ,
+              /// M: add color for secondady.
+              InCallPresenter.getInstance().getPrimaryColorFromCall(mSecondary)));
     } else if (mSecondaryContactInfo != null) {
       LogUtil.v("CallCardPresenter.updateSecondaryDisplayInfo", "" + mSecondaryContactInfo);
       String name = getNameForCall(mSecondaryContactInfo);
@@ -898,7 +965,9 @@ public class CallCardPresenter
               mSecondary.getCallProviderLabel(),
               false /* isConference */,
               mSecondary.isVideoCall(),
-              mIsFullscreen));
+              mIsFullscreen,
+              /// M: add color for secondady.
+              InCallPresenter.getInstance().getPrimaryColorFromCall(mSecondary)));
     } else {
       // Clear the secondary display info.
       mInCallScreen.setSecondary(SecondaryInfo.createEmptySecondaryInfo(mIsFullscreen));
@@ -922,6 +991,15 @@ public class CallCardPresenter
         != PackageManager.PERMISSION_GRANTED) {
       return null;
     }
+
+    // M: add for OP09 plugin. @{
+    String label = ExtensionManager.getCallCardExt().getCallProviderLabel(mContext,
+            mPrimary.getAccountHandle());
+    if (label != null) {
+        return label;
+    }
+    // @}
+
     StatusHints statusHints = mPrimary.getStatusHints();
     if (statusHints != null && !TextUtils.isEmpty(statusHints.getLabel())) {
       return statusHints.getLabel().toString();
@@ -943,6 +1021,14 @@ public class CallCardPresenter
   }
 
   private Drawable getCallStateIcon() {
+    /// M: add for OP09 Plugin. @{
+    Drawable iconEx = ExtensionManager.getCallCardExt().getCallProviderIcon(mContext,
+            mPrimary.getAccountHandle());
+    if (iconEx != null) {
+        return iconEx;
+    }
+    /// @}
+
     // Return connection icon if one exists.
     StatusHints statusHints = mPrimary.getStatusHints();
     if (statusHints != null && statusHints.getIcon() != null) {
@@ -991,7 +1077,18 @@ public class CallCardPresenter
 
     LogUtil.i(
         "CallCardPresenter.onSecondaryInfoClicked", "swapping call to foreground: " + mSecondary);
-    mSecondary.unhold();
+    /// M: DSDA if two incoming exist, switch them @{
+    if (DialerCall.State.isIncomingOrWaiting(mSecondary.getState())) {
+      LogUtil.i(
+          "CallCardPresenter.onSecondaryInfoClicked", "handle DSDA call: " + mSecondary);
+      if (InCallUtils.isTwoIncomingCalls()) {
+          CallList.getInstance().switchIncomingCalls();
+          return;
+      }
+    } else {
+      mSecondary.unhold();
+    }
+    /// @}
   }
 
   @Override
@@ -1170,4 +1267,88 @@ public class CallCardPresenter
       }
     }
   }
+
+  /// M: ------------------------- MediaTek feature ------------------------
+  @Override
+  public void onTimeUpdate(CallList mCallList) {
+    if (getUi() != null) {
+      getUi().updateDeclineTimer();
+    }
+  }
+
+  /**
+   * M: [Hang Up] all
+   */
+  @Override
+  public void onHangupAllClicked() {
+      LogUtil.i("CallCardPresenter","onHangupAllClicked");
+      TelecomAdapter.getInstance().hangupByOption(HangupOptions.HANGUP_ALL);
+  }
+
+  /**
+   * M: [Hang Up] hold
+   */
+  @Override
+  public void onHangupHoldClicked() {
+      LogUtil.i("CallCardPresenter","onHangupHoldClicked");
+      TelecomAdapter.getInstance().hangupByOption(HangupOptions.HANGUP_HOLD);
+  }
+  /// @}
+
+  /**
+   * M: check whether the incoming call is conference.
+   * @param call
+   * @return true if it is Volte conference call.
+   */
+  private boolean isIncomingVolteConference(DialerCall call) {
+      return InCallUIVolteUtils.isIncomingVolteConferenceCall(call);
+  }
+
+  /**
+   * M: need to update primary for volte case.
+   * @param oldState
+   * @param newState
+   * @param call
+   * @return
+   */
+  private boolean needUpdatePrimaryForVolte(
+          InCallState oldState, InCallState newState, DialerCall call) {
+      return call != null &&
+              call.isConferenceCall() &&
+              oldState == InCallState.INCOMING &&
+              newState != InCallState.INCOMING;
+  }
+
+  /// M: For volte @{
+  /**
+   * listner onContactInfoUpdated(),
+   * will be notified when ContactInfoCache finish re-query, triggered by some
+   * call's number change.
+   */
+  private final ContactInfoUpdatedListener mContactInfoUpdatedListener
+          = new ContactInfoUpdatedListener() {
+      public void onContactInfoUpdated(String callId) {
+          handleContactInfoUpdated(callId);
+      }
+  };
+
+  /**
+   * M: ask for new ContactInfo to update UI when re-query complete by ContactInfoCache.
+   */
+  private void handleContactInfoUpdated(String callId) {
+      Log.d(this, "handleContactInfoUpdated()... callId = " + callId);
+      DialerCall call = null;
+      boolean isPrimary = false;
+      if (mPrimary != null && mPrimary.getId() == callId) {
+          isPrimary = true;
+          call = mPrimary;
+      } else if (mSecondary != null && mSecondary.getId() == callId) {
+          isPrimary = false;
+          call = mSecondary;
+      }
+      if (call != null) {
+          startContactInfoSearch(call, isPrimary, call.getState() == DialerCall.State.INCOMING);
+      }
+  }
+  /// @}
 }

@@ -18,15 +18,20 @@ package com.android.dialer.calldetails;
 
 import android.content.Context;
 import android.net.Uri;
+import android.os.PersistableBundle;
 import android.provider.CallLog.Calls;
 import android.support.annotation.ColorInt;
 import android.support.annotation.NonNull;
 import android.support.v4.content.ContextCompat;
 import android.support.v7.widget.RecyclerView.ViewHolder;
+import android.telephony.CarrierConfigManager;
+import android.telephony.SubscriptionManager;
 import android.text.TextUtils;
+import android.util.Log;
 import android.view.View;
 import android.widget.ImageView;
 import android.widget.TextView;
+import com.android.dialer.app.calllog.CallLogActivity;
 import com.android.dialer.calldetails.CallDetailsEntries.CallDetailsEntry;
 import com.android.dialer.calllogutils.CallEntryFormatter;
 import com.android.dialer.calllogutils.CallTypeHelper;
@@ -38,6 +43,10 @@ import com.android.dialer.enrichedcall.historyquery.proto.HistoryResult.Type;
 import com.android.dialer.oem.MotorolaUtils;
 import com.android.dialer.util.DialerUtils;
 import com.android.dialer.util.IntentUtil;
+import com.mediatek.dialer.ext.ExtensionManager;
+
+import mediatek.telephony.MtkCarrierConfigManager;
+
 
 /** ViewHolder for call entries in {@link CallDetailsActivity}. */
 public class CallDetailsEntryViewHolder extends ViewHolder {
@@ -62,6 +71,9 @@ public class CallDetailsEntryViewHolder extends ViewHolder {
 
   private final Context context;
 
+  ///M: For customization using carrier config
+  private boolean mIsSupportCallPull = false;
+
   public CallDetailsEntryViewHolder(View container) {
     super(container);
     context = container.getContext();
@@ -79,9 +91,19 @@ public class CallDetailsEntryViewHolder extends ViewHolder {
     multimediaImage = (ImageView) container.findViewById(R.id.multimedia_image);
     multimediaAttachmentsNumber =
         (TextView) container.findViewById(R.id.multimedia_attachments_number);
+
+    /// M: For customization using carrier config
+    CarrierConfigManager configMgr =
+          (CarrierConfigManager) context.getSystemService(Context.CARRIER_CONFIG_SERVICE);
+    PersistableBundle carrierConfig =
+           configMgr.getConfigForSubId(SubscriptionManager.getDefaultVoiceSubscriptionId());
+    if (carrierConfig != null) {
+        mIsSupportCallPull = carrierConfig.getBoolean(
+          MtkCarrierConfigManager.MTK_KEY_DIALER_CALL_PULL_BOOL);
+    }
   }
 
-  void setCallDetails(
+  public void setCallDetails(
       String number,
       CallDetailsEntry entry,
       CallTypeHelper callTypeHelper,
@@ -100,7 +122,29 @@ public class CallDetailsEntryViewHolder extends ViewHolder {
     callTypeIcon.setShowWifi(
         MotorolaUtils.shouldShowWifiIconInCallLog(context, entry.getFeatures()));
 
+    ///M: Plug-in call to show different icons as per the call type in Call details
+    ExtensionManager.getCallLogExtension().setShowVolteWifi(callTypeIcon, entry.getFeatures());
+
     callTypeText.setText(callTypeHelper.getCallTypeText(callType, isVideoCall, isPulledCall));
+    /// M: For OP01 Video call text change @{
+    ExtensionManager.getCallDetailExtension().changeVideoTypeText(context,
+        callTypeText, isVideoCall, callType);
+    /// @}
+    /// M: For operator, to check for call pull @{
+    if (mIsSupportCallPull) {
+        Log.d("CallDetailHistoryAdapter", "Call pull supported");
+
+        if (callType == CallLogActivity.DECLINED_EXTERNAL_TYPE) {
+            callTypeText.setText(context.getString(R.string.declined));
+        } else if (callType == Calls.ANSWERED_EXTERNALLY_TYPE) {
+            callTypeText.setText(context.getString(R.string.answered_remotely));
+        } else if (callType == CallLogActivity.INCOMING_PULLED_AWAY_TYPE
+                            || callType == CallLogActivity.OUTGOING_PULLED_AWAY_TYPE) {
+            callTypeText.setText(context.getString(R.string.call_pulled_away));
+        }
+    }
+    /// @}
+  callTypeText.setText(callTypeHelper.getCallTypeText(callType, isVideoCall, isPulledCall));
     callTime.setText(CallEntryFormatter.formatDate(context, entry.getDate()));
     if (CallTypeHelper.isMissedCallType(callType)) {
       callDuration.setVisibility(View.GONE);
@@ -113,6 +157,12 @@ public class CallDetailsEntryViewHolder extends ViewHolder {
           CallEntryFormatter.formatDurationAndDataUsageA11y(
               context, entry.getDuration(), entry.getDataUsage()));
     }
+
+    /// M: for Plug-in @{
+    ExtensionManager.getCallDetailExtension().setDurationViewVisibility(
+            callDuration);
+    /// @}
+
     setMultimediaDetails(number, entry, showMultimediaDivider);
   }
 

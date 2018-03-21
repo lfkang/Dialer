@@ -53,6 +53,7 @@ import com.android.dialer.speeddial.SpeedDialFragment;
 import com.android.dialer.util.PermissionsUtil;
 import com.android.dialer.voicemailstatus.VisualVoicemailEnabledChecker;
 import com.android.dialer.voicemailstatus.VoicemailStatusHelper;
+import com.mediatek.dialer.ext.ExtensionManager;
 import java.util.ArrayList;
 
 /**
@@ -75,6 +76,7 @@ public class ListsFragment extends Fragment implements OnPageChangeListener, Lis
   private SharedPreferences mPrefs;
   private boolean mHasFetchedVoicemailStatus;
   private boolean mShowVoicemailTabAfterVoicemailStatusIsFetched;
+  private VoicemailStatusHelper mVoicemailStatusHelper;
   private final ArrayList<OnPageChangeListener> mOnPageChangeListeners = new ArrayList<>();
   /** The position of the currently selected tab. */
   private int mTabIndex = TAB_INDEX_SPEED_DIAL;
@@ -98,6 +100,7 @@ public class ListsFragment extends Fragment implements OnPageChangeListener, Lis
     LogUtil.d("ListsFragment.onCreate", null);
     Trace.beginSection(TAG + " onCreate");
     super.onCreate(savedInstanceState);
+    mVoicemailStatusHelper = new VoicemailStatusHelper();
     mPrefs = PreferenceManager.getDefaultSharedPreferences(getActivity());
     Trace.endSection();
   }
@@ -180,7 +183,7 @@ public class ListsFragment extends Fragment implements OnPageChangeListener, Lis
             mPrefs.getBoolean(
                 VisualVoicemailEnabledChecker.PREF_KEY_HAS_ACTIVE_VOICEMAIL_PROVIDER, false));
     mViewPager.setAdapter(mAdapter);
-    mViewPager.setOffscreenPageLimit(TAB_COUNT_WITH_VOICEMAIL - 1);
+    //mViewPager.setOffscreenPageLimit(TAB_COUNT_WITH_VOICEMAIL - 1);
     mViewPager.addOnPageChangeListener(this);
     showTab(TAB_INDEX_SPEED_DIAL);
 
@@ -200,6 +203,10 @@ public class ListsFragment extends Fragment implements OnPageChangeListener, Lis
     } else {
       LogUtil.w("ListsFragment.onCreateView", "no voicemail read permissions");
     }
+
+    /// M: [For Customization of default TAB opened when start dialer] @{
+    ExtensionManager.getDialPadExtension().customizeDefaultTAB(this);
+    /// @}
 
     Trace.endSection();
     Trace.endSection();
@@ -292,7 +299,7 @@ public class ListsFragment extends Fragment implements OnPageChangeListener, Lis
 
     // Update hasActiveVoicemailProvider, which controls the number of tabs displayed.
     boolean hasActiveVoicemailProvider =
-        VoicemailStatusHelper.getNumberActivityVoicemailSources(statusCursor) > 0;
+        mVoicemailStatusHelper.getNumberActivityVoicemailSources(statusCursor) > 0;
     if (hasActiveVoicemailProvider != mAdapter.hasActiveVoicemailProvider()) {
       mAdapter.setHasActiveVoicemailProvider(hasActiveVoicemailProvider);
       mAdapter.notifyDataSetChanged();
@@ -438,4 +445,11 @@ public class ListsFragment extends Fragment implements OnPageChangeListener, Lis
     }
     Logger.get(getActivity()).logScreenView(screenType, getActivity());
   }
+
+  /// M: [Multi-Delete] For CallLog delete @{
+  @Override
+  public void onCallsDeleted() {
+      // Do nothing
+  }
+  /// @}
 }

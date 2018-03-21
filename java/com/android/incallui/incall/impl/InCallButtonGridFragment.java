@@ -29,10 +29,22 @@ import com.android.incallui.incall.protocol.InCallButtonIds;
 import java.util.List;
 import java.util.Set;
 
+//TINNO BEGIN
+//FEATURE_SMARTGESTURE <免提切换> chenqi.zhao 20180105
+import android.content.Context;
+import com.android.incallui.call.TelecomAdapter;
+import android.content.BroadcastReceiver;
+import android.content.Intent;
+import android.content.IntentFilter;
+import android.telecom.AudioState;
+import com.tinno.feature.FeatureMBA;
+//TINNO END
+
 /** Fragment for the in call buttons (mute, speaker, ect.). */
 public class InCallButtonGridFragment extends Fragment {
 
-  private static final int BUTTON_COUNT = 6;
+  /// M: extend
+  private static final int BUTTON_COUNT = 12;
   private static final int BUTTONS_PER_ROW = 3;
 
   private CheckableLabeledButton[] buttons = new CheckableLabeledButton[BUTTON_COUNT];
@@ -47,6 +59,15 @@ public class InCallButtonGridFragment extends Fragment {
     super.onCreate(bundle);
     buttonGridListener = FragmentUtils.getParent(this, OnButtonGridCreatedListener.class);
     Assert.isNotNull(buttonGridListener);
+
+    //TINNO BEGIN
+    //FEATURE_SMARTGESTURE <免提切换> chenqi.zhao 20180105
+    if (FeatureMBA.MBA_FTR_ApeSmartGesture_REQC1194) {
+      IntentFilter filter = new IntentFilter();
+      filter.addAction("com.android.phone.ACTION_AUDIO_MODE_CHANGE");
+      getActivity().registerReceiver(audioStateReceiver, filter);
+    }
+    //TINNO END
   }
 
   @Nullable
@@ -61,6 +82,14 @@ public class InCallButtonGridFragment extends Fragment {
     buttons[3] = ((CheckableLabeledButton) view.findViewById(R.id.incall_fourth_button));
     buttons[4] = ((CheckableLabeledButton) view.findViewById(R.id.incall_fifth_button));
     buttons[5] = ((CheckableLabeledButton) view.findViewById(R.id.incall_sixth_button));
+    /// M: Extend incall buttons @{
+    buttons[6] = ((CheckableLabeledButton) view.findViewById(R.id.incall_seventh_button));
+    buttons[7] = ((CheckableLabeledButton) view.findViewById(R.id.incall_eighth_button));
+    buttons[8] = ((CheckableLabeledButton) view.findViewById(R.id.incall_ninth_button));
+    buttons[9] = ((CheckableLabeledButton) view.findViewById(R.id.incall_tenth_button));
+    buttons[10] = ((CheckableLabeledButton) view.findViewById(R.id.incall_eleventh_button));
+    buttons[11] = ((CheckableLabeledButton) view.findViewById(R.id.incall_twelveth_button));
+    /// @}
 
     return view;
   }
@@ -76,6 +105,31 @@ public class InCallButtonGridFragment extends Fragment {
     super.onDestroyView();
     buttonGridListener.onButtonGridDestroyed();
   }
+
+  //TINNO BEGIN
+  //FEATURE_SMARTGESTURE <免提切换> chenqi.zhao 20180105
+  @Override
+  public void onDestroy() {
+    super.onDestroy();
+    if (FeatureMBA.MBA_FTR_ApeSmartGesture_REQC1194) {
+      getActivity().unregisterReceiver(audioStateReceiver);
+    }
+  }
+
+  private BroadcastReceiver audioStateReceiver = new BroadcastReceiver() {
+
+    @Override
+    public void onReceive(Context context, Intent intent) {
+      if (!"com.android.phone.ACTION_AUDIO_MODE_CHANGE".equals(intent.getAction())) {
+        return;
+      }
+      boolean speakerOn = intent.getBooleanExtra("speakerOn", false);
+      int newMode = speakerOn ? AudioState.ROUTE_SPEAKER : AudioState.ROUTE_WIRED_OR_EARPIECE;
+      TelecomAdapter.getInstance().setAudioRoute(newMode);
+//      getPresenter().setAudioMode(newMode);
+    }
+  };
+  //TINNO END
 
   public void onInCallScreenDialpadVisibilityChange(boolean isShowing) {
     for (CheckableLabeledButton button : buttons) {
@@ -117,7 +171,8 @@ public class InCallButtonGridFragment extends Fragment {
 
     for (int i = 0; i < BUTTON_COUNT; ++i) {
       if (i >= buttonsToPlace.size()) {
-        buttons[i].setVisibility(View.INVISIBLE);
+        /// M: set to GONE
+        buttons[i].setVisibility(View.GONE);
         continue;
       }
       @InCallButtonIds int button = buttonsToPlace.get(i);

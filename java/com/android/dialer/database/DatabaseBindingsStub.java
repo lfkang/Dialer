@@ -18,6 +18,8 @@ package com.android.dialer.database;
 
 import android.content.Context;
 
+import com.mediatek.dialer.database.DialerDatabaseHelperEx;
+
 /** Default implementation for database bindings. */
 public class DatabaseBindingsStub implements DatabaseBindings {
 
@@ -32,4 +34,20 @@ public class DatabaseBindingsStub implements DatabaseBindings {
     }
     return dialerDatabaseHelper;
   }
+
+  ///M: Mediatek start.
+  /// M: [MTK Dialer Search] @{
+  private DialerDatabaseHelperEx dialerSearchDbHelper;
+  @Override
+  public DialerDatabaseHelperEx getDialerSearchDbHelper(Context context) {
+    if (dialerSearchDbHelper == null) {
+      dialerSearchDbHelper =
+          new DialerDatabaseHelperEx(
+              context, DialerDatabaseHelperEx.DATABASE_NAME,
+              DialerDatabaseHelperEx.DATABASE_VERSION);
+    }
+    return dialerSearchDbHelper;
+  }
+  ///@}
+  ///M: Mediatek end.
 }

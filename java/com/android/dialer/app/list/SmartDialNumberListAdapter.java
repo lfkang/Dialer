@@ -23,10 +23,14 @@ import android.text.TextUtils;
 import android.util.Log;
 import com.android.contacts.common.list.ContactListItemView;
 import com.android.dialer.app.dialpad.SmartDialCursorLoader;
+import com.android.dialer.common.LogUtil;
 import com.android.dialer.smartdial.SmartDialMatchPosition;
 import com.android.dialer.smartdial.SmartDialNameMatcher;
 import com.android.dialer.smartdial.SmartDialPrefix;
 import com.android.dialer.util.CallUtil;
+import com.mediatek.dialer.search.DialerSearchCursorLoader;
+import com.mediatek.dialer.util.DialerFeatureOptions;
+
 import java.util.ArrayList;
 
 /** List adapter to display the SmartDial search results. */
@@ -70,6 +74,12 @@ public class SmartDialNumberListAdapter extends DialerPhoneNumberListAdapter {
    */
   @Override
   protected void setHighlight(ContactListItemView view, Cursor cursor) {
+    /// M: [MTK Dialer Search] @{
+    if (DialerFeatureOptions.isDialerSearchEnabled()) {
+      super.setHighlight(view, cursor);
+      return;
+    }
+    /// @}
     view.clearHighlightSequences();
 
     if (mNameMatcher.matches(cursor.getString(PhoneQuery.DISPLAY_NAME))) {
@@ -114,4 +124,45 @@ public class SmartDialNumberListAdapter extends DialerPhoneNumberListAdapter {
   public void setShowEmptyListForNullQuery(boolean show) {
     mNameMatcher.setShouldMatchEmptyQuery(!show);
   }
+
+  /// M: Mediatek start.
+  /**
+   * M: [MTK Dialer Search] Sets query for the DialerSearchCursorLoader
+   * @param loader
+   */
+  public void configureLoader(DialerSearchCursorLoader loader) {
+    Log.d(TAG, "MTK-DialerSearch, configureLoader, getQueryString: " + getQueryString()
+        + " ,loader: " + loader);
+
+    if (getQueryString() == null) {
+      loader.configureQuery("", true);
+      mNameMatcher.setQuery("");
+    } else {
+      loader.configureQuery(getQueryString(), true);
+      mNameMatcher.setQuery(PhoneNumberUtils.normalizeNumber(getQueryString()));
+    }
+  }
+
+  /**
+   *  M: [MTK Dialer Search] phone number column index changed due to dialer search
+   * @see com.android.contacts.common.list.PhoneNumberListAdapter#getPhoneNumber(int)
+   */
+  @Override
+  public String getPhoneNumber(int position) {
+    if (!DialerFeatureOptions.isDialerSearchEnabled()) {
+      return super.getPhoneNumber(position);
+    }
+
+    Cursor cursor = ((Cursor) getItem(position));
+    if (cursor != null) {
+      String phoneNumber = cursor.getString(SEARCH_PHONE_NUMBER_INDEX);
+      Log.d(TAG,
+          "SmartDialNumberListAdatper: phoneNumber:" + LogUtil.sanitizePhoneNumber(phoneNumber));
+      return phoneNumber;
+    } else {
+      Log.w(TAG, "Cursor was null in getPhoneNumber() call. Returning null instead.");
+      return null;
+    }
+  }
+  /// M: Mediatek end.
 }

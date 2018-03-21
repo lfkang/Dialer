@@ -35,17 +35,25 @@ public class ActionBarController {
   private SearchEditTextLayout mSearchBox;
 
   private boolean mIsActionBarSlidUp;
+  private boolean mStateChangedDuringFadingIn = false;
+  private boolean mStateChangedDuringFadingOut = false;
 
   private final AnimationCallback mFadeOutCallback =
       new AnimationCallback() {
         @Override
         public void onAnimationEnd() {
-          slideActionBar(true /* slideUp */, false /* animate */);
+          if (!mStateChangedDuringFadingOut) {
+            slideActionBar(true /* slideUp */, false /* animate */);
+          } else {
+            LogUtil.i("ActionBarController.mFadeOutCallback.end", "mStateChanged During FadingOut");
+          }
         }
 
         @Override
         public void onAnimationCancel() {
-          slideActionBar(true /* slideUp */, false /* animate */);
+          if (!mStateChangedDuringFadingOut) {
+            slideActionBar(true /* slideUp */, false /* animate */);
+          }
         }
       };
 
@@ -53,12 +61,18 @@ public class ActionBarController {
       new AnimationCallback() {
         @Override
         public void onAnimationEnd() {
-          slideActionBar(false /* slideUp */, false /* animate */);
+          if (!mStateChangedDuringFadingIn) {
+            slideActionBar(false /* slideUp */, false /* animate */);
+          } else {
+            LogUtil.i("ActionBarController.mFadeInCallback.end", "mStateChanged During FadingIn");
+          }
         }
 
         @Override
         public void onAnimationCancel() {
-          slideActionBar(false /* slideUp */, false /* animate */);
+          if (!mStateChangedDuringFadingIn) {
+            slideActionBar(false /* slideUp */, false /* animate */);
+          }
         }
       };
   private ValueAnimator mAnimator;
@@ -121,6 +135,7 @@ public class ActionBarController {
         }
         slideActionBar(false /* slideUp */, true /* animate */);
       } else {
+        mStateChangedDuringFadingIn = false;
         mSearchBox.fadeIn(mFadeInCallback);
       }
     }
@@ -137,12 +152,15 @@ public class ActionBarController {
     } else {
       // From the lists fragment
       mSearchBox.fadeOut(mFadeOutCallback);
+      mStateChangedDuringFadingOut = false;
     }
   }
 
   public void slideActionBar(boolean slideUp, boolean animate) {
     LogUtil.d("ActionBarController.slidingActionBar", "up: %b, animate: %b", slideUp, animate);
 
+    mStateChangedDuringFadingIn = true;
+    mStateChangedDuringFadingOut = true;
     if (mAnimator != null && mAnimator.isRunning()) {
       mAnimator.cancel();
       mAnimator.removeAllUpdateListeners();

@@ -48,7 +48,9 @@
       android:background="@color/videocall_overlay_background_color"
       android:visibility="gone"/>
 
+  <!-- M: Add layout name to disable 'fitsSystemWindows' runtime -->
   <FrameLayout
+      android:id="@+id/incoming_frame_layout"
       android:layout_width="match_parent"
       android:layout_height="match_parent"
       android:fitsSystemWindows="true">
@@ -166,7 +168,7 @@
       android:visibility="invisible"
       tools:visibility="visible"/>
 
-  <com.android.incallui.answer.impl.affordance.SwipeButtonView
+    <com.android.incallui.answer.impl.affordance.SwipeButtonView
       android:id="@+id/incoming_secondary_button2"
       android:layout_width="56dp"
       android:layout_height="56dp"
@@ -175,4 +177,12 @@
       android:src="@drawable/ic_end_answer_32"
       android:visibility="invisible"
       tools:visibility="visible"/>
+
+  <!-- M: Secondary infor for two incoming call -->
+  <FrameLayout
+    android:id="@+id/incall_dsda_banner"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_gravity="top"/>
+
 </com.android.incallui.answer.impl.AffordanceHolderLayout>

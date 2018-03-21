@@ -55,6 +55,10 @@ public interface InCallButtonUiDelegate {
 
   void toggleSpeakerphone();
 
+  /// M:[Voice Record] @{
+  void toggleVoiceRecord(boolean checked);
+  /// @}
+
   CallAudioState getCurrentAudioState();
 
   void setAudioRoute(int route);
@@ -64,4 +68,20 @@ public interface InCallButtonUiDelegate {
   void showAudioRouteSelector();
 
   Context getContext();
+
+  /// M: MediaTek features
+  void changeToAudioClicked();
+  void hidePreviewClicked(boolean checked);
+  /// M: [ECT(blind)]
+  void onBlindOrAssuredEctClicked();
+  void onConsultativeEctClicked();
+  /// M: Cancel upgarde
+  void cancelUpgradeClicked();
+
+  /// M: save mute state in incallpresenter incase of losing state due to
+  //  destroy of videocall fragment. @{
+  void saveAutoMuteState();
+  /// @}
+  /// M: [Device Switch]
+  void onDeviceSwitchClicked();
 }

@@ -22,6 +22,7 @@ import android.content.Loader;
 import android.content.Loader.OnLoadCompleteListener;
 import android.content.pm.PackageManager;
 import android.net.Uri;
+import android.os.Build;
 import android.support.annotation.NonNull;
 import android.support.v4.content.ContextCompat;
 import android.telecom.PhoneAccount;
@@ -111,7 +112,13 @@ public class CallerInfoUtils {
     // Because the InCallUI is immediately launched before the call is connected, occasionally
     // a voicemail call will be passed to InCallUI as a "voicemail:" URI without a number.
     // This call should still be handled as a voicemail call.
-    if (isVoiceMailNumber(context, call)) {
+
+    /// M: ALPS03567937. Using telecom API to check if is voice mail will cost 30ms once.
+    // Using api isVoiceMailNumber() in dialercall. @{
+    // Google code:
+    // if (isVoiceMailNumber(context, call)) {
+    if (call.isVoiceMailNumber()) {
+    /// @}
       info.markAsVoiceMail(context);
     }
 
@@ -240,6 +247,12 @@ public class CallerInfoUtils {
     if (number == null) {
       return "";
     }
+
+    /// M: log enhancement for eng or user debug load. @{
+    if (!("user".equals(Build.TYPE))) {
+        return number;
+    }
+    /// @}
 
     // Todo: Figure out an equivalent for VDBG
     if (false) {

@@ -195,6 +195,8 @@ public class DialpadFragment extends BaseFragment<DialpadPresenter, DialpadUi>
    */
   public void setDtmfText(String text) {
     mDtmfDialerField.setText(PhoneNumberUtilsCompat.createTtsSpannable(text));
+    /// M: set the focus to the end of the text
+    mDtmfDialerField.setSelection(mDtmfDialerField.length());
   }
 
   @Override
@@ -456,6 +458,19 @@ public class DialpadFragment extends BaseFragment<DialpadPresenter, DialpadUi>
     /** Check to see if the keyEvent is dialable. */
     boolean isKeyEventAcceptable(KeyEvent event) {
       return (ok(getAcceptedChars(), lookup(event)));
+    }
+  }
+
+  /// M: ------------------------------- MediaTek feature ---------------------------
+  /**
+   * M: Used for making the fragment's state is latest.
+   * @param hidden Dialpad fragment is hidden or show
+   */
+  @Override
+  public void onHiddenChanged(boolean hidden) {
+    super.onHiddenChanged(hidden);
+    if (!hidden) {
+      updateColors();
     }
   }
 }

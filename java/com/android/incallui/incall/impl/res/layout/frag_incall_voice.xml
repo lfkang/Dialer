@@ -75,6 +75,17 @@
         android:id="@+id/incall_location_holder"
         android:layout_width="match_parent"
         android:layout_height="match_parent"/>
+
+      <!-- M:[Voice Record]record icon -->
+      <!-- M:fix ALPS02297097,recording icon still at the right
+      side as Arabic,correct layout_gravity from right to end -->
+      <ImageView android:id="@+id/voiceRecorderIcon"
+        android:layout_width="@dimen/incall_record_icon_size"
+        android:layout_height="@dimen/incall_record_icon_size"
+        android:layout_gravity="end"
+        android:layout_marginEnd="10dip"
+        android:layout_marginBottom="10dip"
+        android:visibility="gone" />
     </LinearLayout>
 
     <com.android.dialer.widget.LockableViewPager

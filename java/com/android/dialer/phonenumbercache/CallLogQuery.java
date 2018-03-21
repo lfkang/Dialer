@@ -26,6 +26,9 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
+import com.mediatek.dialer.compat.CallLogCompat.CallsCompat;
+import com.mediatek.dialer.util.DialerFeatureOptions;
+
 /** The query for the call log table. */
 public final class CallLogQuery {
 
@@ -60,6 +63,9 @@ public final class CallLogQuery {
   @RequiresApi(VERSION_CODES.N)
   public static final int VIA_NUMBER = 25;
 
+  /// M: [VoLTE ConfCallLog] For Volte conference call calllog
+  public static int CONFERENCE_CALL_ID = -1;
+
   private static final String[] PROJECTION_M =
       new String[] {
         Calls._ID, // 0
@@ -88,12 +94,44 @@ public final class CallLogQuery {
         Calls.CACHED_PHOTO_URI, // 23
       };
 
+  /// M: @{
+  private static final String[] PROJECTION_M2;
+  static {
+    List<String> projectionList = new ArrayList<>(Arrays.asList(PROJECTION_M));
+    /// M:[MTK SIM Contacts feature] @{
+    //if (DialerFeatureOptions.isSimContactsSupport()) {
+      projectionList.add(CallsCompat.CACHED_INDICATE_PHONE_SIM);
+      projectionList.add(CallsCompat.CACHED_IS_SDN_CONTACT);
+    //}
+    /// @}
+    /// M: [VoLTE ConfCallLog] For Volte conference call calllog. @{
+    //if (DialerFeatureOptions.isVolteConfCallLogSupport()) {
+      projectionList.add(CallsCompat.CONFERENCE_CALL_ID);
+      CONFERENCE_CALL_ID = projectionList.size() - 1;
+    //}
+    /// @}
+    PROJECTION_M2 = projectionList.toArray(new String[projectionList.size()]);
+  }
+  /// @}
+
   private static final String[] PROJECTION_N;
 
   static {
     List<String> projectionList = new ArrayList<>(Arrays.asList(PROJECTION_M));
     projectionList.add(CallLog.Calls.POST_DIAL_DIGITS);
     projectionList.add(CallLog.Calls.VIA_NUMBER);
+    /// M:[MTK SIM Contacts feature] @{
+    //if (DialerFeatureOptions.isSimContactsSupport()) {
+      projectionList.add(CallsCompat.CACHED_INDICATE_PHONE_SIM);
+      projectionList.add(CallsCompat.CACHED_IS_SDN_CONTACT);
+    //}
+    /// @}
+    /// M: [VoLTE ConfCallLog] For Volte conference call calllog. @{
+    //if (DialerFeatureOptions.isVolteConfCallLogSupport()) {
+      projectionList.add(CallsCompat.CONFERENCE_CALL_ID);
+      CONFERENCE_CALL_ID = projectionList.size() - 1;
+    //}
+    /// @}
     PROJECTION_N = projectionList.toArray(new String[projectionList.size()]);
   }
 
@@ -102,6 +140,6 @@ public final class CallLogQuery {
     if (VERSION.SDK_INT >= VERSION_CODES.N) {
       return PROJECTION_N;
     }
-    return PROJECTION_M;
+    return PROJECTION_M2;
   }
 }

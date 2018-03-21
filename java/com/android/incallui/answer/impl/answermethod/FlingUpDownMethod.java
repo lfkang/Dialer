@@ -1175,4 +1175,10 @@ public class FlingUpDownMethod extends AnswerMethod implements OnProgressChanged
       return (float) (ampNormalized * Math.sin(time * freqNormalized));
     }
   }
+
+  ///M: ALPS03563079 refresh bounce animation again when go back to answerfragment. @{
+  public void refreshBounceAnimation() {
+    setAnimationState(AnimationState.ENTRY);
+  }
+  /// @}
 }

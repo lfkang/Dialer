@@ -17,13 +17,9 @@
 package com.android.voicemail.impl;
 
 import android.annotation.TargetApi;
-import android.content.Context;
 import android.content.Intent;
 import android.os.Build.VERSION_CODES;
 import android.os.UserManager;
-import android.preference.PreferenceManager;
-import android.support.annotation.MainThread;
-import android.support.annotation.NonNull;
 import android.telecom.PhoneAccountHandle;
 import android.telephony.VisualVoicemailService;
 import android.telephony.VisualVoicemailSms;
@@ -44,7 +40,9 @@ public class OmtpService extends VisualVoicemailService {
 
   public static final String EXTRA_VOICEMAIL_SMS = "extra_voicemail_sms";
 
-  private static final String IS_SHUTTING_DOWN = "com.android.voicemail.impl.is_shutting_down";
+  /// M: default turn off vvm when voicemail ui not config, avoid send sms. @{
+  private static final String IS_ENABLED_KEY = "is_enabled";
+  /// @}
 
   @Override
   public void onCellServiceConnected(
@@ -56,7 +54,7 @@ public class OmtpService extends VisualVoicemailService {
       return;
     }
 
-    if (!isUserUnlocked(this)) {
+    if (!isUserUnlocked()) {
       VvmLog.i(TAG, "onCellServiceConnected: user locked");
       task.finish();
       return;
@@ -81,7 +79,7 @@ public class OmtpService extends VisualVoicemailService {
       return;
     }
 
-    if (!isUserUnlocked(this)) {
+    if (!isUserUnlocked()) {
       LegacyModeSmsHandler.handle(this, sms);
       return;
     }
@@ -111,14 +109,8 @@ public class OmtpService extends VisualVoicemailService {
       return;
     }
 
-    if (!isUserUnlocked(this)) {
+    if (!isUserUnlocked()) {
       VvmLog.i(TAG, "onSimRemoved: user locked");
-      task.finish();
-      return;
-    }
-
-    if (isShuttingDown(this)) {
-      VvmLog.i(TAG, "onSimRemoved: system shutting down, ignoring");
       task.finish();
       return;
     }
@@ -136,28 +128,12 @@ public class OmtpService extends VisualVoicemailService {
       task.finish();
       return;
     }
-    if (!isUserUnlocked(this)) {
+    if (!isUserUnlocked()) {
       VvmLog.i(TAG, "onStopped: user locked");
       task.finish();
       return;
     }
     Logger.get(this).logImpression(DialerImpression.Type.VVM_UNBUNDLED_EVENT_RECEIVED);
-  }
-
-  @MainThread
-  static void onBoot(@NonNull Context context) {
-    VvmLog.i(TAG, "onBoot");
-    Assert.isTrue(isUserUnlocked(context));
-    Assert.isMainThread();
-    setShuttingDown(context, false);
-  }
-
-  @MainThread
-  static void onShutdown(@NonNull Context context) {
-    VvmLog.i(TAG, "onShutdown");
-    Assert.isTrue(isUserUnlocked(context));
-    Assert.isMainThread();
-    setShuttingDown(context, true);
   }
 
   private boolean isModuleEnabled() {
@@ -170,6 +146,17 @@ public class OmtpService extends VisualVoicemailService {
       VvmLog.i(TAG, "VVM not supported on " + phoneAccountHandle);
       return false;
     }
+    /// M: default turn off vvm when voicemail ui not config, avoid send sms. @{
+    VisualVoicemailPreferences prefs = new VisualVoicemailPreferences(this, phoneAccountHandle);
+    if (!prefs.contains(IS_ENABLED_KEY)) {
+        prefs
+            .edit()
+            .putBoolean(IS_ENABLED_KEY, false)
+            .apply();
+        VvmLog.i(TAG, "If not turn on VVM, disable it firstly on: " + phoneAccountHandle);
+        return false;
+    }
+    /// @}
     if (!VisualVoicemailSettingsUtil.isEnabled(this, phoneAccountHandle)
         && !config.isLegacyModeEnabled()) {
       VvmLog.i(TAG, "VVM is disabled");
@@ -178,20 +165,8 @@ public class OmtpService extends VisualVoicemailService {
     return true;
   }
 
-  private static boolean isUserUnlocked(@NonNull Context context) {
-    UserManager userManager = context.getSystemService(UserManager.class);
+  private boolean isUserUnlocked() {
+    UserManager userManager = getSystemService(UserManager.class);
     return userManager.isUserUnlocked();
-  }
-
-  private static void setShuttingDown(Context context, boolean value) {
-    PreferenceManager.getDefaultSharedPreferences(context)
-        .edit()
-        .putBoolean(IS_SHUTTING_DOWN, value)
-        .apply();
-  }
-
-  private static boolean isShuttingDown(Context context) {
-    return PreferenceManager.getDefaultSharedPreferences(context)
-        .getBoolean(IS_SHUTTING_DOWN, false);
   }
 }

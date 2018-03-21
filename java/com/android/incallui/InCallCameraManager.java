@@ -129,6 +129,11 @@ public class InCallCameraManager {
       return;
     }
 
+    /// M: reset the value for further using @{
+    mFrontFacingCameraId = null;
+    mRearFacingCameraId = null;
+    /// @}
+
     for (int i = 0; i < cameraIds.length; i++) {
       CameraCharacteristics c = null;
       try {
@@ -140,11 +145,16 @@ public class InCallCameraManager {
       }
       if (c != null) {
         int facingCharacteristic = c.get(CameraCharacteristics.LENS_FACING);
-        if (facingCharacteristic == CameraCharacteristics.LENS_FACING_FRONT) {
+        /// M: Workaround for projects with three camera sensors, the
+        // camera found the first one.@{
+        if (facingCharacteristic == CameraCharacteristics.LENS_FACING_FRONT
+                && mFrontFacingCameraId == null) {
           mFrontFacingCameraId = cameraIds[i];
-        } else if (facingCharacteristic == CameraCharacteristics.LENS_FACING_BACK) {
+        } else if (facingCharacteristic == CameraCharacteristics.LENS_FACING_BACK
+                && mRearFacingCameraId == null) {
           mRearFacingCameraId = cameraIds[i];
         }
+        ///@}
       }
     }
 

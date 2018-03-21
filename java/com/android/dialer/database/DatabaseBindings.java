@@ -18,8 +18,12 @@ package com.android.dialer.database;
 
 import android.content.Context;
 
+import com.mediatek.dialer.database.DialerDatabaseHelperEx;
+
 /** This interface allows the container application to customize the database module. */
 public interface DatabaseBindings {
 
   DialerDatabaseHelper getDatabaseHelper(Context context);
+  /// M: [MTK Dialer Search]
+  DialerDatabaseHelperEx getDialerSearchDbHelper(Context context);
 }

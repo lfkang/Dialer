@@ -58,6 +58,7 @@ public class SearchEditTextLayout extends FrameLayout {
 
   private Callback mCallback;
 
+
   public SearchEditTextLayout(Context context, AttributeSet attrs) {
     super(context, attrs);
   }
@@ -89,10 +90,12 @@ public class SearchEditTextLayout extends FrameLayout {
     mVoiceSearchButtonView = findViewById(R.id.voice_search_button);
     mOverflowButtonView = findViewById(R.id.dialtacts_options_menu_button);
     mBackButtonView = findViewById(R.id.search_back_button);
-    mBackButtonView
-        .getResources()
-        .getDrawable(R.drawable.quantum_ic_arrow_back_vd_theme_24, null)
-        .setAutoMirrored(true);
+    ///M: Fix for ALPS03576487, set AutoMirrored atrribute in xml @{
+    //mBackButtonView
+    //    .getResources()
+    //    .getDrawable(R.drawable.quantum_ic_arrow_back_vd_theme_24, null)
+    //    .setAutoMirrored(true);
+    //@}
     mClearButtonView = findViewById(R.id.search_close_button);
 
     // Convert a long click into a click to expand the search box. Touch events are also
@@ -272,7 +275,6 @@ public class SearchEditTextLayout extends FrameLayout {
 
     mSearchIcon.setVisibility(collapsedViewVisibility);
     mCollapsedSearchBox.setVisibility(collapsedViewVisibility);
-    mVoiceSearchButtonView.setVisibility(collapsedViewVisibility);
     mOverflowButtonView.setVisibility(collapsedViewVisibility);
     mBackButtonView.setVisibility(expandedViewVisibility);
     // TODO: Prevents keyboard from jumping up in landscape mode after exiting the

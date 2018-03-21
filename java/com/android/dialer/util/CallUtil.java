@@ -46,9 +46,11 @@ public class CallUtil {
 
   /** Return Uri with an appropriate scheme, accepting both SIP and usual phone call numbers. */
   public static Uri getCallUri(String number) {
+  /* Modify for ALPS03443134, phase out sip://
     if (PhoneNumberHelper.isUriNumber(number)) {
       return Uri.fromParts(PhoneAccount.SCHEME_SIP, number, null);
     }
+   */
     return Uri.fromParts(PhoneAccount.SCHEME_TEL, number, null);
   }
 

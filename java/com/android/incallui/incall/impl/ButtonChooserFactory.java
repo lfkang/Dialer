@@ -74,6 +74,9 @@ class ButtonChooserFactory {
     mapping.put(
         InCallButtonIds.BUTTON_UPGRADE_TO_VIDEO, MappingInfo.builder(4).setSlotOrder(10).build());
     mapping.put(InCallButtonIds.BUTTON_SWAP, MappingInfo.builder(5).setSlotOrder(0).build());
+    /// M: Support CDMA hold call for DSDA project. @{
+    mapping.put(InCallButtonIds.BUTTON_HOLD, MappingInfo.builder(5).setSlotOrder(1).build());
+    /// @
     mapping.put(
         InCallButtonIds.BUTTON_SWITCH_TO_SECONDARY,
         MappingInfo.builder(5)
@@ -88,6 +91,10 @@ class ButtonChooserFactory {
     Map<Integer, MappingInfo> mapping = createCommonMapping();
     mapping.put(
         InCallButtonIds.BUTTON_SWITCH_TO_SECONDARY, MappingInfo.builder(4).setSlotOrder(0).build());
+    /// M: Add slot for conference.
+    mapping.put(
+        InCallButtonIds.BUTTON_MANAGE_VOICE_CONFERENCE,
+        MappingInfo.builder(6).setSlotOrder(0).build());
     mapping.put(
         InCallButtonIds.BUTTON_UPGRADE_TO_VIDEO, MappingInfo.builder(4).setSlotOrder(10).build());
 
@@ -101,7 +108,6 @@ class ButtonChooserFactory {
         InCallButtonIds.BUTTON_MANAGE_VOICE_CONFERENCE,
         MappingInfo.builder(5).setSlotOrder(0).build());
     mapping.put(InCallButtonIds.BUTTON_HOLD, MappingInfo.builder(5).setSlotOrder(5).build());
-
     return new ButtonChooser(new MappedButtonConfig(mapping));
   }
 
@@ -112,6 +118,33 @@ class ButtonChooserFactory {
     mapping.put(InCallButtonIds.BUTTON_AUDIO, MappingInfo.builder(2).build());
     mapping.put(InCallButtonIds.BUTTON_MERGE, MappingInfo.builder(3).setSlotOrder(0).build());
     mapping.put(InCallButtonIds.BUTTON_ADD_CALL, MappingInfo.builder(3).build());
+
+    /// M: Extend button mapping @{
+    addMtkCommonMapping(mapping);
+    /// @}
     return mapping;
+  }
+
+  /**
+   * M: Extend the button mapping
+   * @param mapping
+   */
+  private static void addMtkCommonMapping(Map<Integer, MappingInfo> mapping) {
+      // [Voice Record]
+      mapping.put(InCallButtonIds.BUTTON_SWITCH_VOICE_RECORD,
+              MappingInfo.builder(7).setSlotOrder(0).build());
+      // [Hang Up]
+      mapping.put(InCallButtonIds.BUTTON_HANG_UP_ALL,
+              MappingInfo.builder(8).setSlotOrder(0).build());
+      mapping.put(InCallButtonIds.BUTTON_HANG_UP_HOLD,
+              MappingInfo.builder(9).setSlotOrder(0).build());
+      /// [ECT(blind)]
+      mapping.put(InCallButtonIds.BUTTON_ECT,
+              MappingInfo.builder(10).setSlotOrder(0).build());
+      mapping.put(InCallButtonIds.BUTTON_BLIND_ECT,
+              MappingInfo.builder(10).setSlotOrder(1).build());
+      /// [Device Switch]
+      mapping.put(InCallButtonIds.BUTTON_DEVICE_SWITCH,
+              MappingInfo.builder(11).setSlotOrder(0).build());
   }
 }

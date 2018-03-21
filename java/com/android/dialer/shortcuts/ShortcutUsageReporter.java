@@ -71,7 +71,7 @@ public class ShortcutUsageReporter {
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N_MR1 || TextUtils.isEmpty(phoneNumber)) {
       return;
     }
-
+    LogUtil.d("ShortcutUsageReporter.onOutgoingCallAdded", "AsyncTaskExecutor.submit.");
     EXECUTOR.submit(Task.ID, new Task(context), phoneNumber);
   }
 

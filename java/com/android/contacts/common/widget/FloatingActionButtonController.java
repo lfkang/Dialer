@@ -26,6 +26,7 @@ import android.view.animation.Interpolator;
 import com.android.contacts.common.R;
 import com.android.dialer.animation.AnimUtils;
 import com.android.dialer.common.Assert;
+import com.android.dialer.common.LogUtil;
 
 /** Controls the movement and appearance of the FAB (Floating Action Button). */
 public class FloatingActionButtonController {
@@ -53,6 +54,8 @@ public class FloatingActionButtonController {
         resources.getDimensionPixelSize(R.dimen.floating_action_button_width);
     mFloatingActionButtonMarginRight =
         resources.getDimensionPixelOffset(R.dimen.floating_action_button_margin_right);
+    LogUtil.i("FABController.construction", "FAB.width = " + mFloatingActionButtonWidth +
+            ", FABMarginRight= " + mFloatingActionButtonMarginRight);
     mAnimationDuration = resources.getInteger(R.integer.floating_action_button_animation_duration);
     mFab = fab;
   }
@@ -65,6 +68,7 @@ public class FloatingActionButtonController {
    */
   public void setScreenWidth(int screenWidth) {
     mScreenWidth = screenWidth;
+    LogUtil.i("FABController.setScreenWidth", "screenWidth = " + screenWidth);
   }
 
   public boolean isVisible() {

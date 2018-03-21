@@ -95,6 +95,9 @@ public class NotificationBroadcastReceiver extends BroadcastReceiver {
     } else {
       DialerCall call = callList.getVideoUpgradeRequestCall();
       if (call != null) {
+        /// M: ALPS03604839 enter incallscreen when accept upgrade in background. @{
+        InCallPresenter.getInstance().bringToForeground(false);
+        ///@}
         call.getVideoTech().acceptVideoRequest();
       }
     }
@@ -120,6 +123,13 @@ public class NotificationBroadcastReceiver extends BroadcastReceiver {
       LogUtil.e("NotificationBroadcastReceiver.hangUpOngoingCall", "call list is empty");
     } else {
       DialerCall call = callList.getOutgoingCall();
+      /// M: ALPS03534466. In some case, the call may remain in connecting status for long time.
+      // Should give user another chance to go back to incall screen. Also show statusbar notifier
+      // when call is in connecting status. @{
+      if (call == null) {
+        call = callList.getPendingOutgoingCall();
+      }
+      /// @}
       if (call == null) {
         call = callList.getActiveOrBackgroundCall();
       }

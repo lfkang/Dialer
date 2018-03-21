@@ -15,7 +15,7 @@
  */
 package com.android.dialer.app.list;
 
-import static android.Manifest.permission.READ_CONTACTS;
+//import static android.Manifest.permission.READ_CONTACTS;
 
 import android.app.Activity;
 import android.content.pm.PackageManager;
@@ -41,7 +41,13 @@ public class RegularSearchFragment extends SearchFragment
   public static final int PERMISSION_REQUEST_CODE = 1;
 
   private static final int SEARCH_DIRECTORY_RESULT_LIMIT = 5;
-  protected String mPermissionToRequest;
+
+  /** M: request full group permissions instead of READ_CONTACTS,
+   * Because MTK changed the group permissions granting logic. @{
+   */
+  private static final String[] READ_CONTACTS = PermissionsUtil.CONTACTS_FULL_GROUP;
+  protected String[] mPermissionToRequest;
+  /** @}*/
 
   public RegularSearchFragment() {
     configureDirectorySearch();
@@ -138,6 +144,11 @@ public class RegularSearchFragment extends SearchFragment
           && PackageManager.PERMISSION_GRANTED == grantResults[0]) {
         PermissionsUtil.notifyPermissionGranted(getActivity(), permissions[0]);
       }
+      /// M: notify group permissions when them were granted @{
+      if (PermissionsUtil.hasPermission(getActivity(), READ_CONTACTS)) {
+          PermissionsUtil.notifyPermissionGranted(getActivity(), READ_CONTACTS);
+      }
+      ///@}
     }
   }
 
@@ -151,5 +162,15 @@ public class RegularSearchFragment extends SearchFragment
   public interface CapabilityChecker {
 
     boolean isNearbyPlacesSearchEnabled();
+  }
+
+  /**
+   * M:When switch to multi-window mode, some state would loss.
+   */
+  @Override
+  public void onResume() {
+    super.onResume();
+    // re-set for Multi-Window when enter search mode.
+    setShowEmptyListForNullQuery(true);
   }
 }

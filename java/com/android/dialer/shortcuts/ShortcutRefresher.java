@@ -50,6 +50,7 @@ public final class ShortcutRefresher {
     }
 
     //noinspection unchecked
+    LogUtil.d("ShortcutRefresher.refresh", "AsyncTaskExecutor.submit.");
     EXECUTOR.submit(Task.ID, new Task(context), new ArrayList<>(contacts));
   }
 

@@ -48,6 +48,7 @@ import com.android.dialer.util.DialerUtils;
 import com.android.dialer.util.IntentUtil;
 import com.android.dialer.util.PermissionsUtil;
 import com.android.dialer.widget.EmptyContentView;
+import com.mediatek.dialer.util.DialerFeatureOptions;
 
 public class SearchFragment extends PhoneNumberPickerFragment {
 
@@ -77,7 +78,9 @@ public class SearchFragment extends PhoneNumberPickerFragment {
   @Override
   public void onAttach(Activity activity) {
     super.onAttach(activity);
-
+     ///M: It is for fix bug ALPS03333590 {
+     mActivity = (HostInterface)activity;
+     ///@}
     setQuickContactEnabled(true);
     setAdjustSelectionBoundsEnabled(false);
     setDarkTheme(false);
@@ -312,6 +315,12 @@ public class SearchFragment extends PhoneNumberPickerFragment {
 
       Interpolator interpolator = slideUp ? AnimUtils.EASE_IN : AnimUtils.EASE_OUT;
       int duration = slideUp ? mShowDialpadDuration : mHideDialpadDuration;
+       ///M: add for [ALPS03371473] {
+       if (getView() == null) {
+           LogUtil.d("SearchFragment.updatePosition", "getView() == null");
+           return;
+       }
+       /// @}
       getView().setTranslationY(startTranslationValue);
       getView()
           .animate()
@@ -336,6 +345,12 @@ public class SearchFragment extends PhoneNumberPickerFragment {
               });
 
     } else {
+       ///M: add for [ALPS03371473] {
+        if (getView() == null) {
+            LogUtil.d("SearchFragment.updatePosition", "getView() == null");
+            return;
+        }
+        /// @}
       getView().setTranslationY(endTranslationValue);
       resizeListView();
     }
@@ -375,7 +390,9 @@ public class SearchFragment extends PhoneNumberPickerFragment {
       return;
     }
 
-    if (PermissionsUtil.hasContactsReadPermissions(getActivity())) {
+    if (PermissionsUtil.hasContactsReadPermissions(getActivity())
+          /**M:[MTK Dialer Search] to handle contact & phone permission separately.*/
+          ||DialerFeatureOptions.isDialerSearchEnabled()) {
       super.startLoading();
     } else if (TextUtils.isEmpty(getQueryString())) {
       // Clear out any existing call shortcuts.

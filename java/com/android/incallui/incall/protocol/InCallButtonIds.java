@@ -37,8 +37,22 @@ import java.lang.annotation.RetentionPolicy;
   InCallButtonIds.BUTTON_MANAGE_VIDEO_CONFERENCE,
   InCallButtonIds.BUTTON_MANAGE_VOICE_CONFERENCE,
   InCallButtonIds.BUTTON_SWITCH_TO_SECONDARY,
+  /// M: MediaTek features.
+  InCallButtonIds.BUTTON_HIDE_PREVIEW,
+  /// M: [Voice Record]
+  InCallButtonIds.BUTTON_SWITCH_VOICE_RECORD,
+  /// M: [Hang Up All/Hold]
+  InCallButtonIds.BUTTON_HANG_UP_ALL,
+  InCallButtonIds.BUTTON_HANG_UP_HOLD,
+  /// M: [ECT(blind)]
+  InCallButtonIds.BUTTON_ECT,
+  InCallButtonIds.BUTTON_BLIND_ECT,
+  /// M: [Cancel upgrade]
+  InCallButtonIds.BUTTON_CANCEL_UPGRADE,
   InCallButtonIds.BUTTON_COUNT,
+  InCallButtonIds.BUTTON_DEVICE_SWITCH,
 })
+
 public @interface InCallButtonIds {
 
   int BUTTON_AUDIO = 0;
@@ -55,5 +69,19 @@ public @interface InCallButtonIds {
   int BUTTON_MANAGE_VIDEO_CONFERENCE = 11;
   int BUTTON_MANAGE_VOICE_CONFERENCE = 12;
   int BUTTON_SWITCH_TO_SECONDARY = 13;
-  int BUTTON_COUNT = 14;
+  /// M: MediaTek features.
+  int BUTTON_HIDE_PREVIEW = 14;
+  /// M: [Voice Record]
+  int BUTTON_SWITCH_VOICE_RECORD = 15;
+  /// M: [Hang Up All/Hold]
+  int BUTTON_HANG_UP_ALL = 16;
+  int BUTTON_HANG_UP_HOLD = 17;
+  /// M: [ECT(blind)]
+  int BUTTON_ECT = 18;
+  int BUTTON_BLIND_ECT = 19;
+  /// M: [Cancel upgrade]
+  int BUTTON_CANCEL_UPGRADE=20;
+  /// M: [Device Switch]
+  int BUTTON_DEVICE_SWITCH = 21;
+  int BUTTON_COUNT = 22;
 }

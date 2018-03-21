@@ -20,6 +20,8 @@ import android.support.annotation.Nullable;
 import android.support.annotation.VisibleForTesting;
 import android.text.TextUtils;
 import com.android.dialer.smartdial.SmartDialPrefix.PhoneNumberTokens;
+import com.mediatek.dialer.search.SmartDialPadMap;
+
 import java.util.ArrayList;
 
 /**
@@ -32,6 +34,9 @@ import java.util.ArrayList;
 public class SmartDialNameMatcher {
 
   public static final SmartDialMap LATIN_SMART_DIAL_MAP = new LatinSmartDialMap();
+  // M: add for [MTK Dialer Search]
+  public static final SmartDialMap SMART_DIALPAD_MAP = new SmartDialPadMap();
+
   // Whether or not we allow matches like 57 - (J)ohn (S)mith
   private static final boolean ALLOW_INITIAL_MATCH = true;
 

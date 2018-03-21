@@ -41,6 +41,9 @@ import com.android.dialer.phonenumbercache.CallLogQuery;
 import com.android.dialer.telecom.TelecomUtil;
 import com.android.dialer.util.PermissionsUtil;
 import com.android.voicemail.VoicemailComponent;
+import com.mediatek.dialer.compat.CallLogCompat.CallsCompat;
+import com.mediatek.dialer.ext.ExtensionManager;
+import com.mediatek.dialer.util.DialerFeatureOptions;
 import java.lang.ref.WeakReference;
 import java.util.ArrayList;
 import java.util.List;
@@ -184,6 +187,11 @@ public class CallLogQueryHandler extends NoNullCursorAsyncQueryHandler {
       selectionArgs.add(Long.toString(newerThan));
     }
 
+    /// M: for Plug-in @{
+    ExtensionManager.getCallLogExtension()
+            .appendQuerySelection(callType, where, selectionArgs);
+    /// @}
+
     if (callType == Calls.VOICEMAIL_TYPE) {
       VoicemailComponent.get(mContext)
           .getVoicemailClient()
@@ -211,6 +219,12 @@ public class CallLogQueryHandler extends NoNullCursorAsyncQueryHandler {
             .buildUpon()
             .appendQueryParameter(Calls.LIMIT_PARAM_KEY, Integer.toString(limit))
             .build();
+
+    /// M: [VoLTE ConfCallLog] For Volte Conference callLog @{
+    String orderby = Calls.DEFAULT_SORT_ORDER;
+    if (DialerFeatureOptions.isVolteConfCallLogSupport()) {
+        orderby = CallsCompat.SORT_DATE + " DESC";
+    }
     startQuery(
         token,
         null,
@@ -218,7 +232,8 @@ public class CallLogQueryHandler extends NoNullCursorAsyncQueryHandler {
         CallLogQuery.getProjection(),
         selection,
         selectionArgs.toArray(new String[selectionArgs.size()]),
-        Calls.DEFAULT_SORT_ORDER);
+        orderby);
+    /// @}
   }
 
   /** Cancel any pending fetch request. */
@@ -288,7 +303,9 @@ public class CallLogQueryHandler extends NoNullCursorAsyncQueryHandler {
       return;
     }
     try {
-      if (token == QUERY_CALLLOG_TOKEN) {
+      /// M: [Dialer Global Search] For call log global search. @{
+      if (token == QUERY_CALLLOG_TOKEN || token == QUERY_SEARCH_TOKEN) {
+      /// @}
         if (updateAdapterData(cursor)) {
           cursor = null;
         }
@@ -369,6 +386,10 @@ public class CallLogQueryHandler extends NoNullCursorAsyncQueryHandler {
      * ownership of cursor.
      */
     boolean onCallsFetched(Cursor combinedCursor);
+
+    /// M: [Multi-Delete] for Calllog delete @{
+    void onCallsDeleted();
+    /// @}
   }
 
   /**
@@ -402,4 +423,34 @@ public class CallLogQueryHandler extends NoNullCursorAsyncQueryHandler {
       }
     }
   }
+
+  /// M: [Multi-Delete] For call log delete @{
+  public static final String CALL_LOG_TYPE_FILTER = "call_log_type_filter";
+  private static final int DELETE_CALLS_TOKEN = 59;
+
+  @Override
+  protected void onDeleteComplete(int token, Object cookie, int result) {
+    final Listener listener = mListener.get();
+    if (listener != null) {
+      listener.onCallsDeleted();
+    }
+  }
+
+  public void deleteSpecifiedCalls(String deleteFilter) {
+    // / M: [ALPS01757324] in case of deleting VM, use uri with vm parameters
+    // instead
+    startDelete(DELETE_CALLS_TOKEN, null, Calls.CONTENT_URI_WITH_VOICEMAIL, deleteFilter, null);
+  }
+  /// @}
+
+  /// M: [Dialer Global Search] For call log global search. @{
+  private static final int QUERY_SEARCH_TOKEN = 60;
+  public void fetchSearchCalls(Uri uri) {
+      cancelFetch();
+      LogUtil.d(TAG, "[Dialer Global Search] fetchSearchCalls, uri " + uri);
+      startQuery(QUERY_SEARCH_TOKEN, null, uri,
+              CallLogQuery.getProjection(), null, null,
+              Calls.DEFAULT_SORT_ORDER);
+  }
+  /// @}
 }

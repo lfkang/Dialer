@@ -147,6 +147,15 @@ public class BlockReportSpamListener implements CallLogListItemViewHolder.OnClic
       final ContactSource.Type contactSourceType,
       final boolean isSpam,
       final Integer blockId) {
+    /**
+     * M: blockId has chance to be null, so check it here.@{
+     * There is case that the blocked number already be unblocked in other app.
+     */
+    if (blockId == null) {
+      LogUtil.i("BlockReportSpamListener", "do not unblock it when block id is null");
+      return;
+    }
+    /**@}*/
     BlockReportSpamDialogs.UnblockDialogFragment.newInstance(
             displayNumber,
             isSpam,

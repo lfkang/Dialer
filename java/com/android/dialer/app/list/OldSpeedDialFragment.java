@@ -15,7 +15,7 @@
  */
 package com.android.dialer.app.list;
 
-import static android.Manifest.permission.READ_CONTACTS;
+//import static android.Manifest.permission.READ_CONTACTS;
 
 import android.animation.Animator;
 import android.animation.AnimatorSet;
@@ -64,6 +64,11 @@ public class OldSpeedDialFragment extends Fragment
         PhoneFavoritesTileAdapter.OnDataSetChangedForAnimationListener,
         EmptyContentView.OnEmptyViewActionButtonClickedListener,
         FragmentCompat.OnRequestPermissionsResultCallback {
+
+  /** M: request full group permissions instead of READ_CALL_LOG,
+   * Because MTK changed the group permissions granting logic.
+   */
+  private static final String[] READ_CONTACTS = PermissionsUtil.CONTACTS_FULL_GROUP;
 
   private static final int READ_CONTACTS_PERMISSION_REQUEST_CODE = 1;
 
@@ -426,6 +431,11 @@ public class OldSpeedDialFragment extends Fragment
       if (grantResults.length == 1 && PackageManager.PERMISSION_GRANTED == grantResults[0]) {
         PermissionsUtil.notifyPermissionGranted(getActivity(), READ_CONTACTS);
       }
+      /// M: notify group permissions when them were granted @{
+      if (PermissionsUtil.hasPermission(getActivity(), READ_CONTACTS)) {
+          PermissionsUtil.notifyPermissionGranted(getActivity(), READ_CONTACTS);
+      }
+      ///@}
     }
   }
 

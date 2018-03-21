@@ -25,6 +25,7 @@ import android.content.IntentFilter;
 import android.content.Loader;
 import android.database.Cursor;
 import android.os.Bundle;
+import android.util.Log;
 import android.support.v13.app.FragmentCompat;
 import com.android.contacts.common.list.ContactEntryListAdapter;
 import com.android.dialer.app.R;
@@ -35,14 +36,20 @@ import com.android.dialer.database.DialerDatabaseHelper;
 import com.android.dialer.util.PermissionsUtil;
 import com.android.dialer.widget.EmptyContentView;
 import java.util.Arrays;
+import com.mediatek.dialer.search.DialerSearchCursorLoader;
+import com.mediatek.dialer.util.DialerFeatureOptions;
 
 /** Implements a fragment to load and display SmartDial search results. */
 public class SmartDialSearchFragment extends SearchFragment
     implements EmptyContentView.OnEmptyViewActionButtonClickedListener,
         FragmentCompat.OnRequestPermissionsResultCallback {
+  /** M: request full group permissions instead of CALL_PHONE,
+   * Because MTK changed the group permissions granting logic.
+   */
+  private static final String[] CALL_PHONE = PermissionsUtil.PHONE_FULL_GROUP;
 
   private static final int CALL_PHONE_PERMISSION_REQUEST_CODE = 1;
-
+  private static final String TAG = "SmartDialSearchFragment";
   private final BroadcastReceiver mSmartDialUpdatedReceiver =
       new BroadcastReceiver() {
         @Override
@@ -73,10 +80,19 @@ public class SmartDialSearchFragment extends SearchFragment
       return super.onCreateLoader(id, args);
     } else {
       final SmartDialNumberListAdapter adapter = (SmartDialNumberListAdapter) getAdapter();
-      SmartDialCursorLoader loader = new SmartDialCursorLoader(super.getContext());
-      loader.setShowEmptyListForNullQuery(getShowEmptyListForNullQuery());
-      adapter.configureLoader(loader);
-      return loader;
+      /// M: [MTK Dialer Search] @{
+      if (DialerFeatureOptions.isDialerSearchEnabled()) {
+        DialerSearchCursorLoader loader = new DialerSearchCursorLoader(super.getContext(), id,
+            getLoaderManager());
+        adapter.configureLoader(loader);
+        return loader;
+        /// @}
+      } else {
+        SmartDialCursorLoader loader = new SmartDialCursorLoader(super.getContext());
+        loader.setShowEmptyListForNullQuery(getShowEmptyListForNullQuery());
+        adapter.configureLoader(loader);
+        return loader;
+      }
     }
   }
 
@@ -116,10 +132,13 @@ public class SmartDialSearchFragment extends SearchFragment
   @Override
   public void onStop() {
     super.onStop();
-
     LogUtil.i("SmartDialSearchFragment.onStop", "unregistering smart dial update receiver");
-
+  }
+  @Override
+  public void onDestroy() {
+    Log.d(TAG, "SmartDialSearchFragment.onDestroy()");
     getActivity().unregisterReceiver(mSmartDialUpdatedReceiver);
+    super.onDestroy();
   }
 
   @Override

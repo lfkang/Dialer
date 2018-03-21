@@ -21,6 +21,8 @@ import android.app.ActivityManager.AppTask;
 import android.app.ActivityManager.TaskDescription;
 import android.app.AlertDialog;
 import android.app.Dialog;
+import android.app.DialogFragment;
+import android.content.Context;
 import android.content.DialogInterface;
 import android.content.DialogInterface.OnCancelListener;
 import android.content.DialogInterface.OnDismissListener;
@@ -35,6 +37,7 @@ import android.support.v4.app.Fragment;
 import android.support.v4.app.FragmentManager;
 import android.support.v4.app.FragmentTransaction;
 import android.support.v4.content.res.ResourcesCompat;
+import android.telecom.DisconnectCause;
 import android.telecom.PhoneAccountHandle;
 import android.view.KeyEvent;
 import android.view.View;
@@ -53,6 +56,7 @@ import com.android.dialer.compat.CompatUtils;
 import com.android.dialer.logging.Logger;
 import com.android.dialer.logging.ScreenEvent;
 import com.android.dialer.util.ViewUtil;
+import com.android.ims.ImsManager;
 import com.android.incallui.audiomode.AudioModeProvider;
 import com.android.incallui.call.CallList;
 import com.android.incallui.call.DialerCall;
@@ -61,10 +65,17 @@ import com.android.incallui.call.TelecomAdapter;
 import com.android.incallui.disconnectdialog.DisconnectMessage;
 import com.android.incallui.telecomeventui.InternationalCallOnWifiDialogFragment;
 import com.android.incallui.telecomeventui.InternationalCallOnWifiDialogFragment.Callback;
+import com.mediatek.incallui.DMLockBroadcastReceiver;
+import com.mediatek.incallui.plugin.ExtensionManager;
+import com.mediatek.incallui.utils.InCallUtils;
+import com.mediatek.incallui.wfc.WfcDialogActivity;
+
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
 import java.util.ArrayList;
 import java.util.List;
+
+import mediatek.telecom.MtkDisconnectCause;
 
 /** Shared functionality between the new and old in call activity. */
 public class InCallActivityCommon {
@@ -79,6 +90,8 @@ public class InCallActivityCommon {
   private static final String TAG_SELECT_ACCOUNT_FRAGMENT = "tag_select_account_fragment";
   private static final String TAG_DIALPAD_FRAGMENT = "tag_dialpad_fragment";
   private static final String TAG_INTERNATIONAL_CALL_ON_WIFI = "tag_international_call_on_wifi";
+
+  private DMLockBroadcastReceiver mDMLockReceiver;
 
   @Retention(RetentionPolicy.SOURCE)
   @IntDef({
@@ -105,6 +118,13 @@ public class InCallActivityCommon {
   private boolean animateDialpadOnShow;
   private String dtmfTextToPreopulate;
   @DialpadRequestType private int showDialpadRequest = DIALPAD_REQUEST_NONE;
+  /// M: ALPS03459974 Toast and dialog show at the same time @{
+  private Toast mToast = null;
+  /// @}
+
+  /// M: key used to identify call id @{
+  private static final String ARG_CALL_ID = "call_id";
+  /// @}
 
   private final SelectPhoneAccountListener selectAccountListener =
       new SelectPhoneAccountListener() {
@@ -112,23 +132,82 @@ public class InCallActivityCommon {
         public void onPhoneAccountSelected(
             PhoneAccountHandle selectedAccountHandle, boolean setDefault, String callId) {
           DialerCall call = CallList.getInstance().getCallById(callId);
+          /**
+           * M: To fix ALPS03494020
+           * If the call doesn't exist, find the current one with state SELECT_PHONE_ACCOUNT
+           * instead.
+           * There is a timing between Telecom and call-ui, once Telecom report two calls with
+           * state SELECT_PHONE_ACCOUNT in a short time, and ended up the old one, it would make
+           * call-ui to show nothing.
+           * @{
+           */
+          if (call == null) {
+              LogUtil.i("onPhoneAccountSelected", "call not exist, find the real one");
+              call = CallList.getInstance().getWaitingForAccountCall();
+          }
+          /** @} */
           LogUtil.i(
               "InCallActivityCommon.SelectPhoneAccountListener.onPhoneAccountSelected",
               "call: " + call);
           if (call != null) {
+            /// M: [Modification for finishing Transparent InCall Screen if necessary]
+            /// such as:ALPS03748801,select sim press home key, show select again.
+            /// The SELECT_PHONE_ACCOUNT call should "disappear" immediately as the Telecom
+            /// was called. This can avoid many timing issue. such as:ALPS02302461,occur JE
+            /// when MT call arrive at some case. @{
+            call.setState(DialerCall.State.WAIT_ACCOUNT_RESPONSE);
+            /// @}
             call.phoneAccountSelected(selectedAccountHandle, setDefault);
           }
+          /// M:Fix ALPS03478801, Fix create dialog twice timing issue. @{
+          selectPhoneAccountDialogFragment = null;
+          /// @}
         }
 
         @Override
         public void onDialogDismissed(String callId) {
           DialerCall call = CallList.getInstance().getCallById(callId);
+          /**
+           * M: To fix ALPS03494020
+           * If the call doesn't exist, find the current one with state SELECT_PHONE_ACCOUNT
+           * instead.
+           * There is a timing between Telecom and call-ui, once Telecom report two calls with
+           * state SELECT_PHONE_ACCOUNT in a short time, and ended up the old one, it would make
+           * call-ui to show nothing.
+           * @{
+           */
+          if (call == null) {
+              LogUtil.i("onDialogDismissed", "call not exist, find the real one");
+              call = CallList.getInstance().getWaitingForAccountCall();
+          }
+          /** @} */
           LogUtil.i(
               "InCallActivityCommon.SelectPhoneAccountListener.onDialogDismissed",
               "disconnecting call: " + call);
-          if (call != null) {
+          if (call != null
+            /// M: ALPS03453355, to avoid to disconnect call twice @{
+            && call.getState() == DialerCall.State.SELECT_PHONE_ACCOUNT) {
+            /// @}
+            /// M: [Modification for finishing Transparent InCall Screen if necessary]
+            /// such as:ALPS03748801,select sim press home key, show select again.
+            /// The SELECT_PHONE_ACCOUNT call should "disappear" immediately as the Telecom
+            /// was called. This can avoid many timing issue. such as:ALPS02302461,occur JE
+            /// when MT call arrive at some case. @{
+            call.setState(DialerCall.State.WAIT_ACCOUNT_RESPONSE);
+            /// @}
             call.disconnect();
+
+            /// M: ALPS03453355, force to update activity for active call due to it has no listener
+            /// yet for new activity just created for select phone account @{
+            call = CallList.getInstance().getActiveOrBackgroundCall();
+            if (call != null) {
+              inCallActivity.onPrimaryCallStateChanged();
+            }
+            /// @}
           }
+          /// M:Fix ALPS03478801, Fix create dialog twice timing issue. @{
+          selectPhoneAccountDialogFragment = null;
+          /// @}
         }
       };
 
@@ -165,16 +244,28 @@ public class InCallActivityCommon {
   }
 
   public void onCreate(Bundle icicle) {
-    // set this flag so this activity will stay in front of the keyguard
-    // Have the WindowManager filter out touch events that are "too fat".
-    int flags =
-        WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED
-            | WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
-            | WindowManager.LayoutParams.FLAG_IGNORE_CHEEK_PRESSES;
+    /// M: ALPS03452553 [Plugin Host] register context @{
+    final Context context = inCallActivity.getApplicationContext();
+    ExtensionManager.registerApplicationContext(context);
+    /// @}
 
-    inCallActivity.getWindow().addFlags(flags);
+    /// M: set window flags @{
+//    // set this flag so this activity will stay in front of the keyguard
+//    // Have the WindowManager filter out touch events that are "too fat".
+//    int flags =
+//        WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED
+//            | WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
+//            | WindowManager.LayoutParams.FLAG_IGNORE_CHEEK_PRESSES;
+//
+//    inCallActivity.getWindow().addFlags(flags);
+    setWindowFlag();
+    /// @}
 
     inCallActivity.setContentView(R.layout.incall_screen);
+    /// M: [DM Lock] @{
+    mDMLockReceiver = DMLockBroadcastReceiver.getInstance(inCallActivity);
+    mDMLockReceiver.register(inCallActivity);
+    /// @}
 
     internalResolveIntent(inCallActivity.getIntent());
 
@@ -240,6 +331,11 @@ public class InCallActivityCommon {
     }
 
     inCallOrientationEventListener = new InCallOrientationEventListener(inCallActivity);
+    /// M: Force reset Device Orientation on new Call @{
+    if (icicle == null) {
+      inCallOrientationEventListener.resetDeviceOrientation();
+    }
+    /// @}
   }
 
   public void onSaveInstanceState(Bundle out) {
@@ -267,6 +363,9 @@ public class InCallActivityCommon {
           "InCallActivityCommon.onResume",
           "InCallPresenter is ready for tear down, not sending updates");
     } else {
+      /// M: Update theme colors according to primary call. @{
+      InCallPresenter.getInstance().setThemeColors();
+      /// @}
       updateTaskDescription();
       InCallPresenter.getInstance().onUiShowing(true);
     }
@@ -312,7 +411,15 @@ public class InCallActivityCommon {
       dialpadFragment.onDialerKeyUp(null);
     }
 
-    InCallPresenter.getInstance().onUiShowing(false);
+    /// M: ALPS03452709 Fix presenter tear down issue @{
+    if (InCallPresenter.getInstance().isReadyForTearDown()) {
+      LogUtil.i(
+          "InCallActivityCommon.onPause",
+          "InCallPresenter is ready for tear down, not sending updates");
+    /// @}
+    } else {
+      InCallPresenter.getInstance().onUiShowing(false);
+    }
     if (inCallActivity.isFinishing()) {
       InCallPresenter.getInstance().unsetActivity(inCallActivity);
     }
@@ -327,6 +434,9 @@ public class InCallActivityCommon {
   public void onDestroy() {
     InCallPresenter.getInstance().unsetActivity(inCallActivity);
     InCallPresenter.getInstance().updateIsChangingConfigurations();
+    /// M: [DM Lock] @{
+    mDMLockReceiver.unregister(inCallActivity);
+    /// @}
   }
 
   void onNewIntent(Intent intent, boolean isRecreating) {
@@ -347,7 +457,11 @@ public class InCallActivityCommon {
 
     // Just like in onCreate(), handle the intent.
     // Skip if InCallActivity is going to recreate since this will be called in onCreate().
-    if (!isRecreating) {
+    /// M: Fix ALPS03417192 onCreate() is not called if press home and
+    /// press "use touch tone keypad"@{
+    //if (!isRecreating)
+    /// @}
+    {
       internalResolveIntent(intent);
     }
   }
@@ -496,13 +610,31 @@ public class InCallActivityCommon {
   public void maybeShowErrorDialogOnDisconnect(DisconnectMessage disconnectMessage) {
     LogUtil.i(
         "InCallActivityCommon.maybeShowErrorDialogOnDisconnect",
-        "disconnect cause: %s",
+        "disconnect message: %s",
         disconnectMessage);
 
+    //M: WFC @{
+    DisconnectCause cause = disconnectMessage.getDisconnectCause();
+    LogUtil.i(
+        "InCallActivityCommon.maybeShowErrorDialogOnDisconnect",
+        "disconnect cause: %s", cause);
+    // @}
     if (!inCallActivity.isFinishing()) {
       if (disconnectMessage.dialog != null) {
         showErrorDialog(disconnectMessage.dialog, disconnectMessage.toastMessage);
-      }
+      }// M: WFC @{
+      else if (ImsManager.isWfcEnabledByUser(inCallActivity) && ((cause.getCode() ==
+              MtkDisconnectCause.WFC_CALL_ERROR)
+              || ExtensionManager.getInCallExt().maybeShowErrorDialog(cause))) {
+          Intent intent = new Intent(inCallActivity, WfcDialogActivity.class);
+          intent.putExtra(WfcDialogActivity.SHOW_WFC_CALL_ERROR_POPUP, true);
+          intent.putExtra(WfcDialogActivity.WFC_ERROR_LABEL, cause.getLabel());
+          intent.putExtra(WfcDialogActivity.WFC_ERROR_DECRIPTION, cause.getDescription());
+          intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+          inCallActivity.startActivity(intent);
+      } else {
+          ExtensionManager.getInCallExt().showCongratsPopup(cause);
+      } /// @}
     }
   }
 
@@ -521,7 +653,12 @@ public class InCallActivityCommon {
       // If there's only one line in use, AND it's on hold, then we're sure the user
       // wants to use the dialpad toward the exact line, so un-hold the holding line.
       DialerCall call = CallList.getInstance().getActiveOrBackgroundCall();
-      if (call != null && call.getState() == State.ONHOLD) {
+      if (call != null && call.getState() == State.ONHOLD
+          /// M: If has PendingOutgoing, Outgoing or Incoming call, don't unhold call @{
+          && CallList.getInstance().getPendingOutgoingCall() == null
+          && CallList.getInstance().getOutgoingCall() == null
+          && CallList.getInstance().getIncomingCall() == null) {
+          /// @}
         call.unhold();
       }
     }
@@ -554,9 +691,19 @@ public class InCallActivityCommon {
     LogUtil.i("InCallActivityCommon.showErrorDialog", "message: %s", message);
     inCallActivity.dismissPendingDialogs();
 
+    /// M: ALPS03459974 Toast and dialog show at the same time @{
+    if (mToast != null) {
+      mToast.cancel();
+      mToast = null;
+    }
+    /// @}
     // Show toast if apps is in background when dialog won't be visible.
     if (!inCallActivity.isVisible()) {
-      Toast.makeText(inCallActivity.getApplicationContext(), message, Toast.LENGTH_LONG).show();
+      /// M: ALPS03459974 Toast and dialog show at the same time @{
+      // Toast.makeText(inCallActivity.getApplicationContext(), message, Toast.LENGTH_LONG).show();
+      mToast = Toast.makeText(inCallActivity.getApplicationContext(), message, Toast.LENGTH_LONG);
+      mToast.show();
+      /// @}
       return;
     }
 
@@ -766,7 +913,11 @@ public class InCallActivityCommon {
 
   /** Returns the {@link DialpadFragment} that's shown by this activity, or {@code null} */
   @Nullable
-  private DialpadFragment getDialpadFragment() {
+  /// M: ALPS03673734, update dialpad color @{
+  // google original code
+  //private DialpadFragment getDialpadFragment() {
+  public DialpadFragment getDialpadFragment() {
+  /// @}
     FragmentManager fragmentManager = inCallActivity.getDialpadFragmentManager();
     if (fragmentManager == null) {
       return null;
@@ -839,9 +990,39 @@ public class InCallActivityCommon {
 
   private boolean maybeShowAccountSelectionDialog() {
     DialerCall waitingForAccountCall = CallList.getInstance().getWaitingForAccountCall();
-    if (waitingForAccountCall == null) {
+    if (waitingForAccountCall == null
+       /// M: [Modification for finishing Transparent InCall Screen if necessary]
+       /// such as:ALPS03748801,select sim press home key, show select again.
+       /// such as:ALPS02302461,occur JE when MT call arrive at some case. @{
+        || waitingForAccountCall.getStateEx() == DialerCall.State.WAIT_ACCOUNT_RESPONSE
+       /// @}
+       ) {
       return false;
     }
+
+    /**
+     * M: Fix ALPS02759272 and ALPS03494020
+     * If select account dialog already exist, do not show again.
+     * But it needs to update the call id which saved in dialog,
+     * due to that Telecom would end up the the previous call,
+     * if a new call with state "SELECT_PHONE_ACCOUNT",
+     * otherwise it would result UI error.
+     * @{
+     */
+    DialogFragment selectAccountDialog = (DialogFragment) inCallActivity.getFragmentManager().
+            findFragmentByTag(TAG_SELECT_ACCOUNT_FRAGMENT);
+    if (selectAccountDialog != null) {
+        Bundle args = selectAccountDialog.getArguments();
+        if (args != null) {
+            args.putString(ARG_CALL_ID, waitingForAccountCall.getId());
+            LogUtil.i("maybeShowAccountSelectionDialog", "existed, just update call id " +
+                    waitingForAccountCall.getId());
+        } else {
+            LogUtil.e("maybeShowAccountSelectionDialog", "there is no args, ignore update");
+        }
+        return true;
+    }
+    /// @}
 
     Bundle extras = waitingForAccountCall.getIntentExtras();
     List<PhoneAccountHandle> phoneAccountHandles;
@@ -852,6 +1033,21 @@ public class InCallActivityCommon {
       phoneAccountHandles = new ArrayList<>();
     }
 
+    /// M:Fix ALPS03478801, Fix create dialog twice timing issue. @{
+    if (selectPhoneAccountDialogFragment != null) {
+      LogUtil.d("InCallActivityCommon.maybeShowAccountSelectionDialog",
+                "already show SelectPhoneAccountDialogFragment");
+      return true;
+    }
+    /// @}
+
+    /// M: ALPS03605697 previous call dialog still show @{
+    if (dialog != null) {
+      dialog.dismiss();
+      dialog = null;
+    }
+    ///@}
+
     selectPhoneAccountDialogFragment =
         SelectPhoneAccountDialogFragment.newInstance(
             R.string.select_phone_account_for_calls,
@@ -859,8 +1055,60 @@ public class InCallActivityCommon {
             phoneAccountHandles,
             selectAccountListener,
             waitingForAccountCall.getId());
+
+    /// M: add for OP09 plugin. @{
+    ExtensionManager.getInCallExt()
+            .customizeSelectPhoneAccountDialog(selectPhoneAccountDialogFragment);
+    ///@}
+
     selectPhoneAccountDialogFragment.show(
         inCallActivity.getFragmentManager(), TAG_SELECT_ACCOUNT_FRAGMENT);
     return true;
   }
+
+  /**
+   * M: set the window flags.
+   */
+  private void setWindowFlag() {
+      // set this flag so this activity will stay in front of the keyguard
+      int flags = WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED
+                      | WindowManager.LayoutParams.FLAG_IGNORE_CHEEK_PRESSES
+                      | WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON;
+
+      DialerCall call = CallList.getInstance().getActiveOrBackgroundCall();
+      if (call != null && DialerCall.State.isConnectingOrConnected(call.getState())) {
+          // While we are in call, the in-call screen should dismiss the keyguard.
+          // This allows the user to press Home to go directly home without going through
+          // an insecure lock screen.
+          // But we do not want to do this if there is no active call so we do not
+          // bypass the keyguard if the call is not answered or declined.
+
+          /// M: [DM Lock] @{
+          if (!InCallUtils.isDMLocked()) {
+              flags |= WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD;
+              Log.d(this, "set window FLAG_DISMISS_KEYGUARD flag ");
+          }
+          /// @}
+      }
+
+      final WindowManager.LayoutParams lp = inCallActivity.getWindow().getAttributes();
+      lp.flags |= flags;
+      inCallActivity.getWindow().setAttributes(lp);
+  }
+
+  /**
+   * M: ALPS03538860 clear rotation when disable incallOrientationEventListner.
+   * @{
+   */
+  public void checkResetOrientation() {
+    if (!inCallOrientationEventListener.isEnabled()) {
+     LogUtil.d(
+          "InCallActivityCommon.checkResetOrientation", "orientation disallow" +
+             ",orientation" + inCallOrientationEventListener.getCurrentOrientation());
+     inCallOrientationEventListener.resetDeviceOrientation();
+     LogUtil.d(
+          "InCallActivityCommon.checkResetOrientation", "reset orientation");
+    }
+  }
+  /** @} */
 }

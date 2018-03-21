@@ -22,7 +22,11 @@ import android.provider.ContactsContract;
 import android.provider.ContactsContract.CommonDataKinds.Phone;
 import android.provider.ContactsContract.Contacts;
 import android.support.annotation.VisibleForTesting;
+import android.util.Log;
 
+import com.android.contacts.common.preference.ContactsPreferences;
+
+import com.mediatek.provider.MtkContactsContract.ContactsColumns;
 /**
  * Used to create {@link CursorLoader} which finds contacts information from the strequents table.
  *
@@ -30,35 +34,121 @@ import android.support.annotation.VisibleForTesting;
  */
 public final class ContactTileLoaderFactory {
 
-  /**
-   * The _ID field returned for strequent items actually contains data._id instead of contacts._id
-   * because the query is performed on the data table. In order to obtain the contact id for
-   * strequent items, use Phone.contact_id instead.
-   */
-  @VisibleForTesting
-  public static final String[] COLUMNS_PHONE_ONLY =
-      new String[] {
-        Contacts._ID,
-        Contacts.DISPLAY_NAME_PRIMARY,
-        Contacts.STARRED,
-        Contacts.PHOTO_URI,
-        Contacts.LOOKUP_KEY,
-        Phone.NUMBER,
-        Phone.TYPE,
-        Phone.LABEL,
-        Phone.IS_SUPER_PRIMARY,
-        Contacts.PINNED,
-        Phone.CONTACT_ID,
-        Contacts.DISPLAY_NAME_ALTERNATIVE,
-      };
+    private static final String TAG = "ContactTileLoaderFactory";
+    private static final int DISPLAY_NAME = 1;
+    private static final int DISPLAY_ORDER_PRIMARY = 1;
+    private static final int DISPLAY_ORDER_ALTERNATIVE = 2;
+    private static final int SORT_ORDER_PRIMARY = 1;
+    private static final int SORT_ORDER_ALTERNATIVE = 2;
+    /**
+     * The _ID field returned for strequent items actually contains data._id instead of contacts._id
+     * because the query is performed on the data table. In order to obtain the contact id for
+     * strequent items, use Phone.contact_id instead.
+     */
+    @VisibleForTesting
+    public static final String[] COLUMNS_PHONE_ONLY =
+        new String[] {
+            Contacts._ID,
+            Contacts.DISPLAY_NAME_PRIMARY,
+            Contacts.STARRED,
+            Contacts.PHOTO_URI,
+            Contacts.LOOKUP_KEY,
+            Phone.NUMBER,
+            Phone.TYPE,
+            Phone.LABEL,
+            Phone.IS_SUPER_PRIMARY,
+            Contacts.PINNED,
+            Phone.CONTACT_ID,
+            Contacts.DISPLAY_NAME_ALTERNATIVE,
+            // M: add for contacts extensions
+            ContactsColumns.INDICATE_PHONE_SIM,
+        };
 
-  public static CursorLoader createStrequentPhoneOnlyLoader(Context context) {
-    Uri uri =
-        Contacts.CONTENT_STREQUENT_URI
-            .buildUpon()
-            .appendQueryParameter(ContactsContract.STREQUENT_PHONE_ONLY, "true")
-            .build();
+    public static CursorLoader createStrequentPhoneOnlyLoader(Context context) {
+        Uri uri =
+            Contacts.CONTENT_STREQUENT_URI
+                .buildUpon()
+                .appendQueryParameter(ContactsContract.STREQUENT_PHONE_ONLY, "true")
+                .build();
 
-    return new CursorLoader(context, uri, COLUMNS_PHONE_ONLY, null, null, null);
-  }
+        /** M: Bug Fix for CR ALPS00319593 @{ */
+        CursorLoader cursorLoader;
+        if (isMtkPhoneBookSupport()) {
+            cursorLoader = new CursorLoader(context, uri, COLUMNS_PHONE_ONLY,
+                    ContactsColumns.INDICATE_PHONE_SIM + "=-1 ",
+                    null, null);
+        } else {
+            cursorLoader = new CursorLoader(context, uri, COLUMNS_PHONE_ONLY,
+                    null, null, null);
+        }
+        fixSortOrderByPreference(cursorLoader, DISPLAY_NAME, context);
+        return cursorLoader;
+        /** @} */
+    }
+
+    /** M: Bug Fix for CR ALPS00319593 @{ */
+    private static boolean isMtkPhoneBookSupport() {
+        try {
+            Class<?> iccPhoneBook = Class.forName(
+                  "com.mediatek.internal.telephony.phb.IMtkIccPhoneBook");
+            iccPhoneBook.getDeclaredMethod("getUsimAasList", int.class);
+            iccPhoneBook.getDeclaredMethod("getUsimGroups", int.class);
+            iccPhoneBook.getDeclaredMethod("hasSne", int.class);
+        } catch (ClassNotFoundException e) {
+            Log.e(TAG, "Android phonebook class not found!");
+            return false;
+        } catch (NoSuchMethodException e) {
+            Log.e(TAG, "MTK phonebook api not found!");
+            return false;
+        }
+        return true;
+    }
+
+    private static void fixSortOrderByPreference(CursorLoader cursorLoader, int displayNameIndex,
+            Context context) {
+        String[] project = cursorLoader.getProjection();
+        if (project == null || project.length < displayNameIndex) {
+            Log.d(TAG, "[fixSortByPreference] project is null or not right:" + project);
+            return;
+        }
+
+        ContactsPreferences preferences = new ContactsPreferences(context);
+
+        // for display name sort order
+        int displayNameSortOrder = preferences.getDisplayOrder();
+        switch (displayNameSortOrder) {
+            case DISPLAY_ORDER_PRIMARY:
+                project[displayNameIndex] = Contacts.DISPLAY_NAME_PRIMARY;
+                break;
+            case DISPLAY_ORDER_ALTERNATIVE:
+                project[displayNameIndex] = Contacts.DISPLAY_NAME_ALTERNATIVE;
+                break;
+            default:
+                Log.w(TAG, "[fixSortByPreference] displayNameSortOrder is error:"
+                    + displayNameSortOrder);
+        }
+
+        // for contacts sort order
+        int contactsSoryOrder = preferences.getSortOrder();
+        String order = cursorLoader.getSortOrder();
+        if (order != null) {
+            Log.w(TAG, "[fixSortByPreference] The CursorLoader already has sort order:"
+                + order);
+            return;
+        }
+        Log.i(TAG, "[fixSortByPreference]displayNameSortOrder:" + displayNameSortOrder
+                + ",contactsSoryOrder = " + contactsSoryOrder);
+        switch (contactsSoryOrder) {
+            case SORT_ORDER_PRIMARY:
+                cursorLoader.setSortOrder(Contacts.SORT_KEY_PRIMARY);
+                break;
+            case SORT_ORDER_ALTERNATIVE:
+                cursorLoader.setSortOrder(Contacts.SORT_KEY_ALTERNATIVE);
+                break;
+            default:
+                Log.w(TAG, "[fixSortByPreference] Contacts SortOrder is error:"
+                    + contactsSoryOrder);
+        }
+    }
+    /** @} */
 }

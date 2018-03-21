@@ -25,6 +25,8 @@ import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
+import com.mediatek.dialer.ext.ExtensionManager;
+
 public class EmptyContentView extends LinearLayout implements View.OnClickListener {
 
   /** Listener to call when action button is clicked. */
@@ -73,6 +75,10 @@ public class EmptyContentView extends LinearLayout implements View.OnClickListen
     } else {
       mDescriptionView.setText(resourceId);
       mDescriptionView.setVisibility(View.VISIBLE);
+
+      ///M: For plugin to set the empty view text @{
+      ExtensionManager.getCallLogExtension().setEmptyViewText(mDescriptionView);
+      ///@}
     }
   }
 

@@ -50,4 +50,7 @@ public interface InCallScreen {
   boolean isShowingLocationUi();
 
   Fragment getInCallScreenFragment();
+
+  /// M: MediaTek features.
+  void updateDeclineTimer();
 }

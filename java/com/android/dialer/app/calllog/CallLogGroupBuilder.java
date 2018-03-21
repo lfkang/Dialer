@@ -28,6 +28,9 @@ import com.android.contacts.common.util.DateUtils;
 import com.android.dialer.compat.AppCompatConstants;
 import com.android.dialer.phonenumbercache.CallLogQuery;
 import com.android.dialer.phonenumberutil.PhoneNumberHelper;
+import com.mediatek.dialer.ext.ExtensionManager;
+import com.mediatek.dialer.util.DialerFeatureOptions;
+
 import java.util.Objects;
 
 /**
@@ -84,6 +87,13 @@ public class CallLogGroupBuilder {
     long currentTime = System.currentTimeMillis();
     cursor.moveToFirst();
 
+    /// M: [VoLTE ConfCallLog] For Volte Conference call calllog @{
+    long firstConfCallId = -1;
+    if (DialerFeatureOptions.isVolteConfCallLogSupport()) {
+      firstConfCallId = cursor.getLong(CallLogQuery.CONFERENCE_CALL_ID);
+    }
+    /// @}
+
     // Determine the day group for the first call in the cursor.
     final long firstDate = cursor.getLong(CallLogQuery.DATE);
     final long firstRowId = cursor.getLong(CallLogQuery.ID);
@@ -109,6 +119,20 @@ public class CallLogGroupBuilder {
     String accountId;
 
     while (cursor.moveToNext()) {
+      /// M: [VoLTE ConfCallLog] For Volte Conference call calllog @{
+      long currentConfCallId = -1;
+      if (DialerFeatureOptions.isVolteConfCallLogSupport()) {
+        currentConfCallId = cursor.getLong(CallLogQuery.CONFERENCE_CALL_ID);
+      }
+      boolean hasConferenceCallLog = false;
+      if (firstConfCallId > 0 || currentConfCallId > 0) {
+        hasConferenceCallLog = true;
+      }
+      boolean isSameConference = false;
+      if (firstConfCallId == currentConfCallId && currentConfCallId > 0) {
+        isSameConference = true;
+      }
+      /// @}
       // Obtain the values for the current call to group.
       number = cursor.getString(CallLogQuery.NUMBER);
       numberPostDialDigits =
@@ -129,13 +153,16 @@ public class CallLogGroupBuilder {
 
       // Group with the same number and account. Never group voicemails. Only group blocked
       // calls with other blocked calls.
-      if (isSameNumber
+      ///M: Plugin call to group based on call features also
+      if ((isSameNumber && ExtensionManager.getCallLogExtension().sameCallFeature(cursor))
           && isSameAccount
           && isSamePostDialDigits
           && isSameViaNumbers
           && areBothNotVoicemail(callType, groupCallType)
           && (areBothNotBlocked(callType, groupCallType)
-              || areBothBlocked(callType, groupCallType))) {
+              || areBothBlocked(callType, groupCallType))
+          /// M: [VoLTE ConfCallLog]
+          && !hasConferenceCallLog || isSameConference) {
         // Increment the size of the group to include the current call, but do not create
         // the group until finding a call that does not match.
         groupSize++;
@@ -150,6 +177,10 @@ public class CallLogGroupBuilder {
 
         // Start a new group; it will include at least the current call.
         groupSize = 1;
+
+        /// M: [VoLTE ConfCallLog] For Volte Conference call calllog. @{
+        firstConfCallId = currentConfCallId;
+        /// @}
 
         // Update the group values to those of the current call.
         groupNumber = number;

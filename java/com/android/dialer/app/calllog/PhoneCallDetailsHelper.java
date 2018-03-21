@@ -18,14 +18,19 @@ package com.android.dialer.app.calllog;
 
 import android.content.Context;
 import android.content.res.Resources;
+import android.graphics.Color;
 import android.graphics.Typeface;
+import android.os.PersistableBundle;
 import android.provider.CallLog.Calls;
 import android.provider.ContactsContract.CommonDataKinds.Phone;
 import android.support.v4.content.ContextCompat;
 import android.telecom.PhoneAccount;
+import android.telephony.CarrierConfigManager;
+import android.telephony.SubscriptionManager;
 import android.text.TextUtils;
 import android.text.format.DateUtils;
 import android.text.util.Linkify;
+import android.util.Log;
 import android.view.View;
 import android.widget.TextView;
 import com.android.dialer.app.R;
@@ -35,9 +40,15 @@ import com.android.dialer.logging.ContactSource;
 import com.android.dialer.oem.MotorolaUtils;
 import com.android.dialer.phonenumberutil.PhoneNumberHelper;
 import com.android.dialer.util.DialerUtils;
+import com.mediatek.dialer.compat.ContactsCompat.PhoneCompat;
+import com.mediatek.dialer.ext.ExtensionManager;
+import com.mediatek.dialer.util.CallLogHighlighter;
+import com.mediatek.dialer.util.DialerFeatureOptions;
 import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.concurrent.TimeUnit;
+
+import mediatek.telephony.MtkCarrierConfigManager;
 
 /** Helper class to fill in the views in {@link PhoneCallDetailsViews}. */
 public class PhoneCallDetailsHelper {
@@ -56,6 +67,8 @@ public class PhoneCallDetailsHelper {
   private CharSequence mPhoneTypeLabelForTest;
   /** List of items to be concatenated together for accessibility descriptions */
   private ArrayList<CharSequence> mDescriptionItems = new ArrayList<>();
+  ///M: For customization using carrier config
+  private boolean mIsSupportCallPull = false;
 
   /**
    * Creates a new instance of the helper.
@@ -69,6 +82,22 @@ public class PhoneCallDetailsHelper {
     mResources = resources;
     mCallLogCache = callLogCache;
     mCalendar = Calendar.getInstance();
+    /// M: [Dialer Global Search] for CallLogSearch @{
+    if (DialerFeatureOptions.DIALER_GLOBAL_SEARCH) {
+      initHighlighter();
+    }
+    /// @}
+
+    ///M: For customization using carrier config
+    CarrierConfigManager configMgr =
+        (CarrierConfigManager) mContext.getSystemService(Context.CARRIER_CONFIG_SERVICE);
+    PersistableBundle carrierConfig =
+         configMgr.getConfigForSubId(SubscriptionManager.getDefaultVoiceSubscriptionId());
+    if (carrierConfig != null) {
+        mIsSupportCallPull = carrierConfig.getBoolean(
+          MtkCarrierConfigManager.MTK_KEY_DIALER_CALL_PULL_BOOL);
+    }
+    // Combine the count (if present) and the date.
   }
 
   /** Fills the call details views with content. */
@@ -91,6 +120,11 @@ public class PhoneCallDetailsHelper {
         MotorolaUtils.shouldShowHdIconInCallLog(mContext, details.features));
     views.callTypeIcons.setShowWifi(
         MotorolaUtils.shouldShowWifiIconInCallLog(mContext, details.features));
+
+    ///M: Plug-in call to show different icons VoLTE, VoWifi, ViWifi in call logs
+    ExtensionManager.getCallLogExtension().setShowVolteWifi(views.callTypeIcons,
+                                 details.features);
+
     views.callTypeIcons.requestLayout();
     views.callTypeIcons.setVisibility(View.VISIBLE);
 
@@ -130,7 +164,7 @@ public class PhoneCallDetailsHelper {
       views.callAccountLabel.setVisibility(View.GONE);
     }
 
-    final CharSequence nameText;
+    CharSequence nameText;
     final CharSequence displayNumber = details.displayNumber;
     if (TextUtils.isEmpty(details.getPreferredName())) {
       nameText = displayNumber;
@@ -139,6 +173,15 @@ public class PhoneCallDetailsHelper {
     } else {
       nameText = details.getPreferredName();
     }
+
+    /// M: [Dialer Global Search]for CallLog Search @{
+    if (DialerFeatureOptions.DIALER_GLOBAL_SEARCH && mHighlightString != null
+        && mHighlightString.length > 0) {
+      boolean onlyNumber = TextUtils.isEmpty(details.getPreferredName());
+      nameText = getHightlightedCallLogName(nameText.toString(),
+          mHighlightString, onlyNumber);
+    }
+    /// @}
 
     views.nameView.setText(nameText);
 
@@ -176,7 +219,8 @@ public class PhoneCallDetailsHelper {
 
       // Only add the call type or location if its not empty.  It will be empty for unknown
       // callers.
-      if (!TextUtils.isEmpty(callTypeOrLocation)) {
+      /** M: [VoLTE ConfCallLog] the conference call only show date not show location or label  */
+      if (!TextUtils.isEmpty(callTypeOrLocation) && details.conferenceId <= 0) {
         mDescriptionItems.add(callTypeOrLocation);
       }
     }
@@ -217,7 +261,7 @@ public class PhoneCallDetailsHelper {
         numberFormattedLabel =
             mPhoneTypeLabelForTest != null
                 ? mPhoneTypeLabelForTest
-                : Phone.getTypeLabel(mResources, details.numberType, details.numberLabel);
+                : PhoneCompat.getTypeLabel(mContext, details.numberType, details.numberLabel);
       }
     }
 
@@ -346,7 +390,6 @@ public class PhoneCallDetailsHelper {
   /** Sets the call count, date, and if it is a voicemail, sets the duration. */
   private void setDetailText(
       PhoneCallDetailsViews views, Integer callCount, PhoneCallDetails details) {
-    // Combine the count (if present) and the date.
     CharSequence dateText = details.callLocationAndDate;
     final CharSequence text;
     if (callCount != null) {
@@ -363,6 +406,23 @@ public class PhoneCallDetailsHelper {
               getVoicemailDuration(details)));
     } else {
       views.callLocationAndDate.setText(text);
+      /// M: For operator, to check for call pull @{
+      if (mIsSupportCallPull) {
+          CharSequence detailText = null;
+          Log.d("PhoneCallDetailsHelper", "Call pull supported");
+          if (details.callTypes[0] == CallLogActivity.DECLINED_EXTERNAL_TYPE) {
+                detailText = mContext.getString(R.string.declined) + ", " + text;
+                views.callLocationAndDate.setText(detailText);
+          } else if (details.callTypes[0] == Calls.ANSWERED_EXTERNALLY_TYPE) {
+                detailText = mContext.getString(R.string.answered_remotely) + ", " + text;
+                views.callLocationAndDate.setText(detailText);
+          } else if (details.callTypes[0] == CallLogActivity.INCOMING_PULLED_AWAY_TYPE
+                        || details.callTypes[0] == CallLogActivity.OUTGOING_PULLED_AWAY_TYPE) {
+                detailText = mContext.getString(R.string.call_pulled_away) + ", " + text;
+                views.callLocationAndDate.setText(detailText);
+          }
+       }
+       ///}@
     }
   }
 
@@ -374,4 +434,28 @@ public class PhoneCallDetailsHelper {
     }
     return mResources.getString(R.string.voicemailDurationFormat, minutes, seconds);
   }
+
+  /// M: [Dialer Global Search] for CallLog search @{
+  private CallLogHighlighter mHighlighter;
+  private char[] mHighlightString;
+
+  private void initHighlighter() {
+    mHighlighter = new CallLogHighlighter(Color.GREEN);
+  }
+
+  public void setHighlightedText(char[] highlightedText) {
+    mHighlightString = highlightedText;
+  }
+
+  private String getHightlightedCallLogName(String text, char[] highlightText,
+      boolean isOnlyNumber) {
+    String name = text;
+    if (isOnlyNumber) {
+      name = mHighlighter.applyNumber(text, highlightText).toString();
+    } else {
+      name = mHighlighter.applyName(text, highlightText).toString();
+    }
+    return name;
+  }
+  /// @}
 }

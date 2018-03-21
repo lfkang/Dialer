@@ -75,7 +75,11 @@ final class CallDetailsAdapter extends RecyclerView.Adapter<RecyclerView.ViewHol
     if (position == 0) { // Header
       ((CallDetailsHeaderViewHolder) holder).updateContactInfo(contact);
     } else if (position == getItemCount() - 1) {
-      ((CallDetailsFooterViewHolder) holder).setPhoneNumber(contact.getNumber());
+      ///M:add post dial digits
+      ((CallDetailsFooterViewHolder) holder).setPhoneNumber(contact.getNumber()
+          + contact.getPostDialDigits());
+     ///M: if show edit number before call
+     ((CallDetailsFooterViewHolder) holder).canEditNumberBeforeCall(contact.getCanEditNumber());
     } else {
       CallDetailsEntryViewHolder viewHolder = (CallDetailsEntryViewHolder) holder;
       CallDetailsEntry entry = callDetailsEntries.get(position - 1);

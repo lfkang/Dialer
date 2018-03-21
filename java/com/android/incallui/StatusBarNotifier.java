@@ -52,6 +52,7 @@ import android.telecom.Call.Details;
 import android.telecom.PhoneAccount;
 import android.telecom.PhoneAccountHandle;
 import android.telecom.TelecomManager;
+import android.telecom.VideoProfile;
 import android.text.BidiFormatter;
 import android.text.Spannable;
 import android.text.SpannableString;
@@ -75,6 +76,7 @@ import com.android.dialer.oem.MotorolaUtils;
 import com.android.dialer.util.DrawableConverter;
 import com.android.incallui.ContactInfoCache.ContactCacheEntry;
 import com.android.incallui.ContactInfoCache.ContactInfoCacheCallback;
+import com.android.incallui.ContactInfoCache.ContactInfoUpdatedListener;
 import com.android.incallui.InCallPresenter.InCallState;
 import com.android.incallui.async.PausableExecutorImpl;
 import com.android.incallui.call.CallList;
@@ -84,13 +86,21 @@ import com.android.incallui.ringtone.DialerRingtoneManager;
 import com.android.incallui.ringtone.InCallTonePlayer;
 import com.android.incallui.ringtone.ToneGeneratorFactory;
 import com.android.incallui.videotech.utils.SessionModificationState;
+import com.mediatek.incallui.plugin.ExtensionManager;
+import com.mediatek.incallui.utils.InCallUtils;
+import com.mediatek.incallui.volte.InCallUIVolteUtils;
+
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
 
 /** This class adds Notifications to the status bar for the in-call experience. */
 public class StatusBarNotifier
-    implements InCallPresenter.InCallStateListener, EnrichedCallManager.StateChangedListener {
+    implements InCallPresenter.InCallStateListener, EnrichedCallManager.StateChangedListener,
+    /// M: add for auto decline timer
+    InCallPresenter.AutoDeclineTimerListener,
+    /// M: [1A1H2W] check 2W state.
+    InCallPresenter.IncomingCallListener {
 
   private static final String NOTIFICATION_TAG = "STATUS_BAR_NOTIFIER";
   private static final int NOTIFICATION_ID = 1;
@@ -125,6 +135,10 @@ public class StatusBarNotifier
   private Uri mRingtone;
   private StatusBarCallListener mStatusBarCallListener;
 
+  /// M: Video state to identfy SRVCC notification updating @{
+  private int mVideoState = VideoProfile.STATE_AUDIO_ONLY;
+  /// @}
+
   public StatusBarNotifier(@NonNull Context context, @NonNull ContactInfoCache contactInfoCache) {
     Objects.requireNonNull(context);
     mContext = context;
@@ -136,13 +150,23 @@ public class StatusBarNotifier
             new InCallTonePlayer(new ToneGeneratorFactory(), new PausableExecutorImpl()),
             CallList.getInstance());
     mCurrentNotification = NOTIFICATION_NONE;
+    /// M: For volte @{
+    ContactInfoCache.getInstance(mContext)
+            .addContactInfoUpdatedListener(mContactInfoUpdatedListener);
+    /// @}
+    /// M: get StatusBarNotifier instance
+    ExtensionManager.getStatusBarExt().getStatusBarNotifier(this);
   }
 
   /**
    * Should only be called from a irrecoverable state where it is necessary to dismiss all
    * notifications.
    */
-  static void clearAllCallNotifications(Context backupContext) {
+  /* M: For Autoanswer access:
+   * Google code:
+   * static void clearAllCallNotifications(Context backupContext) {
+   * */
+  public static void clearAllCallNotifications(Context backupContext) {
     LogUtil.i(
         "StatusBarNotifier.clearAllCallNotifications",
         "something terrible happened, clear all InCall notifications");
@@ -243,6 +267,10 @@ public class StatusBarNotifier
     } else {
       cancelNotification();
     }
+
+    /// M: add for OP02 plugin. @{
+    ExtensionManager.getStatusBarExt().updateInCallNotification(call);
+    /// @}
   }
 
   @RequiresPermission(Manifest.permission.READ_PHONE_STATE)
@@ -326,6 +354,9 @@ public class StatusBarNotifier
       notificationType = NOTIFICATION_IN_CALL;
     }
 
+    /// M: [1A1H2W] check 2W state
+    final int color = InCallPresenter.getInstance().getPrimaryColorFromCall(call);
+
     if (!checkForChangeAndSaveData(
         iconResId,
         content,
@@ -333,7 +364,14 @@ public class StatusBarNotifier
         contentTitle,
         callState,
         notificationType,
-        contactInfo.contactRingtoneUri)) {
+        contactInfo.contactRingtoneUri,
+        /// M: [1A1H2W] Case @{
+        color,
+        /// @}
+        /// M: Video state to identfy SRVCC notification updating @{
+        call.getVideoState()
+        /// @}
+        )) {
       return;
     }
 
@@ -366,7 +404,7 @@ public class StatusBarNotifier
       accountHandle = getAnyPhoneAccount();
     }
 
-    LogUtil.i("StatusBarNotifier.buildAndSendNotification", "notificationType=" + notificationType);
+    LogUtil.d("StatusBarNotifier.buildAndSendNotification", "notificationType=" + notificationType);
     switch (notificationType) {
       case NOTIFICATION_INCOMING_CALL:
         if (BuildCompat.isAtLeastO()) {
@@ -404,19 +442,38 @@ public class StatusBarNotifier
     builder.setContentText(content);
     builder.setSmallIcon(iconResId);
     builder.setContentTitle(contentTitle);
-    builder.setLargeIcon(largeIcon);
-    builder.setColor(
-        mContext.getResources().getColor(R.color.dialer_theme_color, mContext.getTheme()));
-
-    if (isVideoUpgradeRequest) {
-      builder.setUsesChronometer(false);
-      addDismissUpgradeRequestAction(builder);
-      addAcceptUpgradeRequestAction(builder);
-    } else {
-      createIncomingCallNotification(call, callState, builder);
+    /// M: Add for [1A1H2W] @{
+    if(InCallUtils.isTwoIncomingCalls()) {
+      builder.setContentTitle(mContext.getString(R.string.two_incoming_calls));
     }
+    /// @}
+    builder.setLargeIcon(largeIcon);
+    /// M: CTA request, set sim color from call. @{
+    // Google code:
+    // builder.setColor(
+    //     mContext.getResources().getColor(R.color.dialer_theme_color, mContext.getTheme()));
+    builder.setColor(InCallPresenter.getInstance().getPrimaryColorFromCall(call));
+    /// @}
 
-    addPersonReference(builder, contactInfo, call);
+    /// M: [1A1H2W] not show Action buttons. @{
+    if (!InCallUtils.isTwoIncomingCalls()) {
+      if (isVideoUpgradeRequest) {
+        /// M: show auto decline count timer.
+        appendCountdown(builder, content);
+
+        builder.setUsesChronometer(false);
+        addDismissUpgradeRequestAction(builder);
+        addAcceptUpgradeRequestAction(builder);
+      } else {
+        createIncomingCallNotification(call, callState, builder);
+      }
+
+      addPersonReference(builder, contactInfo, call);
+    }
+    /// @}
+
+    ///M: Status bar modification of vowifi quality
+    ExtensionManager.getStatusBarExt().customizeNotification(builder, largeIcon);
 
     // Fire off the notification
     Notification notification = builder.build();
@@ -483,11 +540,21 @@ public class StatusBarNotifier
     // Add hang up option for any active calls (active | onhold), outgoing calls (dialing).
     if (state == DialerCall.State.ACTIVE
         || state == DialerCall.State.ONHOLD
-        || DialerCall.State.isDialing(state)) {
+        || DialerCall.State.isDialing(state)
+        /// M: ALPS03534466. In some case, the call may remain in connecting status for long time.
+        // Should give user another chance to go back to incall screen. Also show statusbar notifier
+        // when call is in connecting status. @{
+        || DialerCall.State.isConnecting(state)) {
+        /// @}
       addHangupAction(builder);
     } else if (state == DialerCall.State.INCOMING || state == DialerCall.State.CALL_WAITING) {
       addDismissAction(builder);
       if (call.isVideoCall()) {
+        /// M: [video call]3G VT doesn't support answer as voice. @{
+        if (call.getVideoFeatures().supportsAnswerAsVoice()) {
+            addVoiceAction(builder);
+        }
+        /// @}
         addVideoCallAction(builder);
       } else {
         addAnswerAction(builder);
@@ -521,7 +588,31 @@ public class StatusBarNotifier
       String contentTitle,
       int state,
       int notificationType,
-      Uri ringtone) {
+      Uri ringtone,
+      /** M: 1A1H2W @{ */
+      int color,
+      /** @} */
+      /// M: Video state to identfy SRVCC notification updating @{
+      int videoState) {
+      /// @}
+    /**
+     * M: Need update notification after InCall activity shown or hidden.
+     * For new incoming call, when user back to InCallActivity while the notification
+     * not update and the notification still in FullScreen mode. @{
+     */
+    final boolean isInCallShown = InCallPresenter.getInstance().isShowingInCallUi();
+    if (mIsCallUiShown != isInCallShown){
+        mIsCallUiShown = isInCallShown;
+        mCallState = state;
+        return true;
+    }
+    /** @} */
+
+    ///M: Need to update notification or not @{
+    if (ExtensionManager.getStatusBarExt().needUpdateNotification()) {
+        return true;
+    }
+    /// @}
 
     // The two are different:
     // if new title is not null, it should be different from saved version OR
@@ -533,6 +624,11 @@ public class StatusBarNotifier
     boolean largeIconChanged =
         mSavedLargeIcon == null ? largeIcon != null : !mSavedLargeIcon.sameAs(largeIcon);
 
+    ///M:[VideoCall] when call is waiting for upgrade to video call , we should
+    //update the timer for 20 seconds. //@{
+    final boolean countDownChanged = mSavedCountDown !=
+            InCallPresenter.getInstance().getAutoDeclineCountdown();
+
     // any change means we are definitely updating
     boolean retval =
         (mSavedIcon != icon)
@@ -540,7 +636,22 @@ public class StatusBarNotifier
             || (mCallState != state)
             || largeIconChanged
             || contentTitleChanged
-            || !Objects.equals(mRingtone, ringtone);
+            || !Objects.equals(mRingtone, ringtone)
+            /// M: [VideoCall] update the timer
+            || countDownChanged
+            /// M: [1A1H2W] add check 2W state and Call color
+            || (mIsTwoIncoming != InCallUtils.isTwoIncomingCalls()) || (mSavedColor != color)
+    /// M: Video state to identfy SRVCC notification updating @{
+            || (mVideoState != videoState);
+
+    mVideoState = videoState;
+    /// @}
+
+    mIsTwoIncoming = InCallUtils.isTwoIncomingCalls();
+    mSavedColor = color;
+    final boolean isTwoIncoming = CallList.getInstance().getIncomingCall() != null
+            && CallList.getInstance().getSecondaryIncomingCall() != null;
+    /// @}
 
     // If we aren't showing a notification right now or the notification type is changing,
     // definitely do an update.
@@ -558,6 +669,8 @@ public class StatusBarNotifier
     mSavedLargeIcon = largeIcon;
     mSavedContentTitle = contentTitle;
     mRingtone = ringtone;
+    ///[video call] store the countdown time
+    mSavedCountDown = InCallPresenter.getInstance().getAutoDeclineCountdown();
 
     if (retval) {
       LogUtil.d(
@@ -571,11 +684,25 @@ public class StatusBarNotifier
   @VisibleForTesting
   @Nullable
   String getContentTitle(ContactCacheEntry contactInfo, DialerCall call) {
-    if (call.isConferenceCall()) {
-      return CallerInfoUtils.getConferenceString(
-          mContext, call.hasProperty(Details.PROPERTY_GENERIC_CONFERENCE));
-    }
+    /// M:  incoming conference should show the invite number when incoming or waiting @{
+    boolean isIncomingOrWaiting =
+        call.getState() == DialerCall.State.INCOMING
+        || call.getState() == DialerCall.State.CALL_WAITING;
+    /// @}
 
+    if (call.isConferenceCall()
+        /// M: incoming conference should show the invited number when incoming or waiting @{
+        && !isIncomingOrWaiting) {
+        /// @}
+      /// M: [VoLTE conference]incoming volte conference @{
+      if (!InCallUIVolteUtils.isIncomingVolteConferenceCall(call)) {
+          return mContext.getResources().getString(R.string.conference_call_name);
+      } else {
+          return CallerInfoUtils.getConferenceString(
+            mContext, call.hasProperty(Details.PROPERTY_GENERIC_CONFERENCE));
+      }
+      /// @}
+    }
     String preferredName =
         ContactDisplayUtils.getPreferredDisplayName(
             contactInfo.namePrimary, contactInfo.nameAlternative, mContactsPreferences);
@@ -601,7 +728,7 @@ public class StatusBarNotifier
   }
 
   /** Gets a large icon from the contact info object to display in the notification. */
-  private static Bitmap getLargeIconToDisplay(
+  private Bitmap getLargeIconToDisplay(
       Context context, ContactCacheEntry contactInfo, DialerCall call) {
     Resources resources = context.getResources();
     Bitmap largeIcon = null;
@@ -609,12 +736,26 @@ public class StatusBarNotifier
       largeIcon = ((BitmapDrawable) contactInfo.photo).getBitmap();
     }
     if (contactInfo.photo == null) {
+      /// M: ALPS03567937. Do not create large icon every time due to performance. @{
+      if (mSavedDrawablePhoto == null &&
+        mSavedSpam == call.isSpam() &&
+        mSavedLargeIcon != null) {
+        LogUtil.d("StatusBarNotifier.getLargeIconToDisplay", "skip...");
+        return mSavedLargeIcon;
+      }
+      /// @}
+
       int width = (int) resources.getDimension(android.R.dimen.notification_large_icon_width);
       int height = (int) resources.getDimension(android.R.dimen.notification_large_icon_height);
       @ContactType
       int contactType =
           LetterTileDrawable.getContactTypeFromPrimitives(
-              CallerInfoUtils.isVoiceMailNumber(context, call),
+              /// M: ALPS03567937. Using telecom API to check if is voice mail will cost 30ms once.
+              // Update and save isVoiceNumber in dialercall. @{
+              // Google code:
+              // CallerInfoUtils.isVoiceMailNumber(context, call),
+              call.isVoiceMailNumber(),
+              /// @}
               call.isSpam(),
               contactInfo.isBusiness,
               call.getNumberPresentation(),
@@ -633,6 +774,9 @@ public class StatusBarNotifier
       Drawable drawable = resources.getDrawable(R.drawable.blocked_contact, context.getTheme());
       largeIcon = DrawableConverter.drawableToBitmap(drawable);
     }
+
+    mSavedSpam = call.isSpam();
+    mSavedDrawablePhoto = contactInfo.photo;
     return largeIcon;
   }
 
@@ -700,6 +844,12 @@ public class StatusBarNotifier
       resId = R.string.notification_ongoing_call_wifi;
     }
 
+    /// M: [VoLTE conference]incoming VoLTE conference need special text @{
+    if (InCallUIVolteUtils.isIncomingVolteConferenceCall(call)) {
+        return mContext.getString(R.string.card_title_incoming_conference);
+    }
+    /// @}
+
     if (isIncomingOrWaiting) {
       if (call.isSpam()) {
         resId = R.string.notification_incoming_spam_call;
@@ -708,7 +858,14 @@ public class StatusBarNotifier
       } else if (call.hasProperty(Details.PROPERTY_WIFI)) {
         resId = R.string.notification_incoming_call_wifi;
       } else {
-        resId = R.string.notification_incoming_call;
+        /// M: CTA SIM Name for incoming call. @{
+        String providerName = call.getCallProviderLabel();
+        if (TextUtils.isEmpty(providerName) || InCallUtils.isTwoIncomingCalls()) {
+          resId = R.string.notification_incoming_call;
+        } else {
+          return mContext.getString(R.string.contact_grid_incoming_via_template, providerName);
+        }
+        /// @}
       }
     } else if (call.getState() == DialerCall.State.ONHOLD) {
       resId = R.string.notification_on_hold;
@@ -806,6 +963,21 @@ public class StatusBarNotifier
     if (call == null) {
       call = callList.getOutgoingCall();
     }
+
+    /// M: ALPS03534466. In some case, the call may remain in connecting status for long time.
+    // Should give user another chance to go back to incall screen. Also show statusbar notifier
+    // when call is in connecting status. @{
+    if (call == null) {
+      call = callList.getPendingOutgoingCall();
+      /// M: ALPS03567937. Show notification of connecting call will cost about 300ms.
+      // Only show notification about connecting Emergency call. @{
+      if (call != null && !call.isEmergencyCall()) {
+        call = null;
+      }
+      /// @}
+    }
+    /// @}
+
     if (call == null) {
       call = callList.getVideoUpgradeRequestCall();
     }
@@ -815,14 +987,29 @@ public class StatusBarNotifier
     return call;
   }
 
-  private Spannable getActionText(@StringRes int stringRes, @ColorRes int colorRes) {
+  /// M: Use account color to show action button. @{
+  // Google code:
+  private Spannable getActionText(
+    @StringRes int stringRes,
+    /// M: Use account color to show action button. @{
+    // Google code:
+    // @ColorRes int colorRes) {
+    int color) {
+    /// @}
     Spannable spannable = new SpannableString(mContext.getText(stringRes));
     if (VERSION.SDK_INT >= VERSION_CODES.N_MR1) {
       // This will only work for cases where the Notification.Builder has a fullscreen intent set
       // Notification.Builder that does not have a full screen intent will take the color of the
       // app and the following leads to a no-op.
+
+      /// M: Use account color to show action button. @{
+      // Google code:
+      // spannable.setSpan(
+      //     new ForegroundColorSpan(mContext.getColor(colorRes)), 0, spannable.length(), 0);
       spannable.setSpan(
-          new ForegroundColorSpan(mContext.getColor(colorRes)), 0, spannable.length(), 0);
+          new ForegroundColorSpan(color), 0, spannable.length(), 0);
+      /// @}
+
     }
     return spannable;
   }
@@ -836,8 +1023,13 @@ public class StatusBarNotifier
     builder.addAction(
         new Notification.Action.Builder(
                 Icon.createWithResource(mContext, R.drawable.quantum_ic_call_white_24),
+                /// M: Use account color to show action button. @{
+                // Google code:
+                // getActionText(
+                //     R.string.notification_action_answer, R.color.notification_action_accept),
                 getActionText(
-                    R.string.notification_action_answer, R.color.notification_action_accept),
+                    R.string.notification_action_answer, mSavedColor),
+                /// @}
                 answerVoicePendingIntent)
             .build());
   }
@@ -851,8 +1043,13 @@ public class StatusBarNotifier
     builder.addAction(
         new Notification.Action.Builder(
                 Icon.createWithResource(mContext, R.drawable.quantum_ic_close_white_24),
+                /// M: Use account color to show action button. @{
+                // Google code:
+                // getActionText(
+                //     R.string.notification_action_dismiss, R.color.notification_action_dismiss),
                 getActionText(
-                    R.string.notification_action_dismiss, R.color.notification_action_dismiss),
+                    R.string.notification_action_dismiss, mSavedColor),
+                /// @}
                 declinePendingIntent)
             .build());
   }
@@ -880,9 +1077,14 @@ public class StatusBarNotifier
     builder.addAction(
         new Notification.Action.Builder(
                 Icon.createWithResource(mContext, R.drawable.quantum_ic_videocam_white_24),
+                /// M: Use account color to show action button. @{
+                // Google code:
+                // getActionText(
+                //     R.string.notification_action_answer_video,
+                //     R.color.notification_action_answer_video),
                 getActionText(
-                    R.string.notification_action_answer_video,
-                    R.color.notification_action_answer_video),
+                    R.string.notification_action_answer_video, mSavedColor),
+                /// @}
                 answerVideoPendingIntent)
             .build());
   }
@@ -896,8 +1098,13 @@ public class StatusBarNotifier
     builder.addAction(
         new Notification.Action.Builder(
                 Icon.createWithResource(mContext, R.drawable.quantum_ic_videocam_white_24),
+                /// M: Use account color to show action button. @{
+                // Google code:
+                // getActionText(
+                //     R.string.notification_action_accept, R.color.notification_action_accept),
                 getActionText(
-                    R.string.notification_action_accept, R.color.notification_action_accept),
+                    R.string.notification_action_accept, mSavedColor),
+                /// @}
                 acceptVideoPendingIntent)
             .build());
   }
@@ -911,8 +1118,13 @@ public class StatusBarNotifier
     builder.addAction(
         new Notification.Action.Builder(
                 Icon.createWithResource(mContext, R.drawable.quantum_ic_videocam_white_24),
+                /// M: Use account color to show action button. @{
+                // Google code:
+                // getActionText(
+                //     R.string.notification_action_dismiss, R.color.notification_action_dismiss),
                 getActionText(
-                    R.string.notification_action_dismiss, R.color.notification_action_dismiss),
+                    R.string.notification_action_dismiss, mSavedColor),
+                /// @}
                 declineVideoPendingIntent)
             .build());
   }
@@ -1021,6 +1233,101 @@ public class StatusBarNotifier
         cleanup();
         updateNotification(CallList.getInstance());
       }
+    }
+  }
+
+  /// M: ------------------ MediaTek features ---------------------------
+  /// M: [1A1H2W] indicate the 2W state
+  private boolean mIsTwoIncoming;
+  private int mSavedColor = -1;
+  /// M:[VideoCall] add to indentify upgrade condition
+  private long mSavedCountDown = -1;
+  /// M: InCall activity state for notification update
+  private boolean mIsCallUiShown = InCallPresenter.getInstance().isShowingInCallUi();
+
+  /// M: ALPS03567937. Do not create large icon every time due to performance. @{
+  private Drawable mSavedDrawablePhoto;
+  private boolean mSavedSpam;
+  /// @}
+
+  /**
+   * M: append a countdown number to the notification's content description.
+   * @param builder
+   * @param originalText
+   */
+  private void appendCountdown(Notification.Builder builder, String originalText) {
+      long countdown = InCallPresenter.getInstance().getAutoDeclineCountdown();
+      if (countdown < 0) {
+          return;
+      }
+      StringBuilder sb = new StringBuilder();
+      sb.append(originalText).append(" (").append(countdown).append(")");
+      builder.setContentText(sb.toString());
+  }
+
+  @Override
+  public void onTimeUpdate(CallList callList) {
+    LogUtil.d("StatusBarNotifier.onTimeUpdate","");
+    updateNotification(callList);
+  }
+
+  private void addVoiceAction(Notification.Builder builder) {
+    LogUtil.i(
+        "StatusBarNotifier.addVoiceAction",
+        "Will show \"voice\" action in the incoming call Notification");
+
+    PendingIntent answerVoicePendingIntent = createNotificationPendingIntent(
+            mContext, ACTION_ANSWER_VOICE_INCOMING_CALL);
+    builder.addAction(R.drawable.quantum_ic_call_white_24,
+            mContext.getText(R.string.notification_action_answer_voice),
+            answerVoicePendingIntent);
+  }
+
+  /// M: for volte @{
+  /**
+   * M: listen onContactInfoUpdated(),
+   * will be notified when ContactInfoCache finish re-query, triggered by some call's
+   * number change.
+   */
+  private final ContactInfoUpdatedListener mContactInfoUpdatedListener =
+          new ContactInfoUpdatedListener() {
+      public void onContactInfoUpdated(String callId) {
+          handleContactInfoUpdated();
+      }
+  };
+
+  /**
+   * M: when contact info changes, update status bar if necessary.
+   * TODO: this function should do the same thing as #updateInCallNotification.
+   */
+  private void handleContactInfoUpdated() {
+      DialerCall call = getCallToShow(CallList.getInstance());
+      if (call != null) {
+          showNotification(CallList.getInstance(), call);
+      }
+  }
+
+  /**
+   * unregister ContactInfoUpdatedListener.
+   */
+  public void tearDown() {
+      if (mContext != null) {
+          ContactInfoCache.getInstance(mContext)
+                  .removeContactInfoUpdatedListener(mContactInfoUpdatedListener);
+
+          /// M: ALPS03452553 call end but notification still exist after dialer killed @{
+          LogUtil.d("StatusBarNotifier.tearDown", "cancel notification");
+          clearAllCallNotifications(mContext);
+      }
+  }
+  /// @}
+
+  /// M: [1A1H2W] check 2W state
+  @Override
+  public void onIncomingCall(InCallState oldState, InCallState newState,
+      DialerCall call) {
+    if (InCallUtils.isTwoIncomingCalls()) {
+      showNotification(CallList.getInstance(), call);
     }
   }
 }

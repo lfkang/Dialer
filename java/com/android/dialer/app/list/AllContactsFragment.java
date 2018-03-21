@@ -16,7 +16,7 @@
 
 package com.android.dialer.app.list;
 
-import static android.Manifest.permission.READ_CONTACTS;
+//import static android.Manifest.permission.READ_CONTACTS;
 
 import android.app.Activity;
 import android.content.BroadcastReceiver;
@@ -54,6 +54,10 @@ public class AllContactsFragment extends ContactEntryListFragment<ContactEntryLi
     implements OnEmptyViewActionButtonClickedListener,
         FragmentCompat.OnRequestPermissionsResultCallback {
 
+  /** M: request full group permissions instead of READ_CALL_LOG,
+   * Because MTK changed the group permissions granting logic.
+   */
+  private static final String[] READ_CONTACTS = PermissionsUtil.CONTACTS_FULL_GROUP;
   private static final int READ_CONTACTS_PERMISSION_REQUEST_CODE = 1;
 
   private EmptyContentView mEmptyListView;
@@ -111,10 +115,14 @@ public class AllContactsFragment extends ContactEntryListFragment<ContactEntryLi
       super.startLoading();
       mEmptyListView.setDescription(R.string.all_contacts_empty);
       mEmptyListView.setActionLabel(R.string.all_contacts_empty_add_contact_action);
+      /// M: Add it to reload data.
+      mHasContactsPermission = true;
     } else {
       mEmptyListView.setDescription(R.string.permission_no_contacts);
       mEmptyListView.setActionLabel(R.string.permission_single_turn_on);
       mEmptyListView.setVisibility(View.VISIBLE);
+      /// M: Add it to reload data.
+      mHasContactsPermission = false;
     }
   }
 
@@ -201,4 +209,20 @@ public class AllContactsFragment extends ContactEntryListFragment<ContactEntryLi
       }
     }
   }
+
+  /// M: In the multi-window mode, the permission changed, but the onStop(),onStart()
+  /// never be called. Trigger reloading in onResume() @{
+  private boolean mHasContactsPermission = false;
+
+  @Override
+  public void onResume() {
+    super.onResume();
+    boolean hasContactsPermisssion = PermissionsUtil.hasPermission(getActivity(), READ_CONTACTS);
+    if (!mHasContactsPermission && hasContactsPermisssion) {
+      // We didn't have the permission before, and now we do. Force reload the
+      // contacts.
+      reloadData();
+    }
+  }
+  /// @}
 }

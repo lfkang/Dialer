@@ -18,6 +18,7 @@ package com.android.incallui;
 
 import android.content.Context;
 import android.content.Intent;
+import android.net.Uri;
 import android.os.IBinder;
 import android.telecom.Call;
 import android.telecom.CallAudioState;
@@ -27,6 +28,8 @@ import com.android.incallui.audiomode.AudioModeProvider;
 import com.android.incallui.call.CallList;
 import com.android.incallui.call.ExternalCallList;
 import com.android.incallui.call.TelecomAdapter;
+import com.mediatek.incallui.plugin.ExtensionManager;
+import com.mediatek.incallui.utils.InCallUtils;
 
 /**
  * Used to receive updates about calls from the Telecom component. This service is bound to Telecom
@@ -50,7 +53,30 @@ public class InCallServiceImpl extends InCallService {
 
   @Override
   public void onCallAdded(Call call) {
-    InCallPresenter.getInstance().onCallAdded(call);
+    /**
+     * M: When in upgrade progress or in requesting for VILTE call,
+     * It should reject the incoming call and disconnect other calls,
+     * except the emergency call.
+     * @{
+     */
+    if ((CallList.getInstance().getVideoUpgradeRequestCall() != null ||
+            CallList.getInstance().getSendingVideoUpgradeRequestCall() != null ||
+            /// M: When is cancel upgrade progress,we can't add another call in calllist. @{
+            CallList.getInstance().getSendingCancelUpgradeRequestCall() != null)
+            ///@}
+            && !isEmergency(call)) {
+        if (call.getState() == Call.STATE_RINGING) {
+            call.reject(false, null);
+        } else {
+            call.disconnect();
+        }
+        Log.d(this, "[Debug][CC][InCallUI][OP][Hangup][null][null]" +
+        "auto disconnect call while upgrading to video");
+        InCallUtils.showOutgoingFailMsg(getApplicationContext(), call);
+    } else {
+        InCallPresenter.getInstance().onCallAdded(call);
+    }
+    /** @} */
   }
 
   @Override
@@ -65,7 +91,11 @@ public class InCallServiceImpl extends InCallService {
 
   @Override
   public IBinder onBind(Intent intent) {
+    Log.d(this, "onBind");
     final Context context = getApplicationContext();
+    /// M: [Plugin Host] register context @{
+    ExtensionManager.registerApplicationContext(context);
+    /// @}
     final ContactInfoCache contactInfoCache = ContactInfoCache.getInstance(context);
     InCallPresenter.getInstance()
         .setUp(
@@ -84,6 +114,10 @@ public class InCallServiceImpl extends InCallService {
     if (ReturnToCallController.isEnabled(this)) {
       returnToCallController = new ReturnToCallController(this);
     }
+    /// M: for pct vilte auto test on instrument @{
+    ExtensionManager.getVilteAutoTestHelperExt().registerReceiver(context,
+            InCallPresenter.getInstance(),TelecomAdapter.getInstance());
+    /// @}
 
     return super.onBind(intent);
   }
@@ -107,5 +141,17 @@ public class InCallServiceImpl extends InCallService {
       returnToCallController.tearDown();
       returnToCallController = null;
     }
+    /// M: for pct vilte auto test on instrument @{
+    ExtensionManager.getVilteAutoTestHelperExt().unregisterReceiver();
+    /// @}
   }
+
+  /// M: ---------------- MediaTek feature -------------------
+  /// M: fix CR:ALPS02696713,can not dial ECC when requesting for vilte call. @{
+  private boolean isEmergency(Call call) {
+      Uri handle = call.getDetails().getHandle();
+      return android.telephony.PhoneNumberUtils.isEmergencyNumber(
+              handle == null ? "" : handle.getSchemeSpecificPart());
+  }
+  /// @}
 }

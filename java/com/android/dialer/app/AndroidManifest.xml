@@ -54,6 +54,13 @@
    presses home. -->
   <uses-permission android:name="android.permission.STOP_APP_SWITCHES"/>
 
+  <!-- M: for using query speeddial of OP01-->
+  <uses-permission android:name="android.permission.READ_SPEED_DIAL" />
+
+  <!-- M: for *#0000# feature of OP09-->
+  <uses-permission android:name="android.permission.MANAGE_USERS" />
+  <uses-permission android:name="android.permission.CREATE_USERS" />
+
   <uses-sdk
     android:minSdkVersion="23"
     android:targetSdkVersion="26"/>

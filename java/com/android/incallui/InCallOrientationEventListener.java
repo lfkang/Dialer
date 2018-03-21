@@ -191,4 +191,21 @@ public class InCallOrientationEventListener extends OrientationEventListener {
     }
     return SCREEN_ORIENTATION_UNKNOWN;
   }
+
+  /**
+   * M: Force to set device orientation just in case.
+   * @param orientation Device Orientation
+   */
+  public void setDeviceOrientation(int orientation) {
+      sCurrentOrientation = orientation;
+  }
+
+  /**
+   * M: Reset device orientation to SCREEN_ORIENTATION_0.
+   * {@link InCallOrientationEventListener#SCREEN_ORIENTATION_0}
+   */
+  public void resetDeviceOrientation() {
+      Log.d(this, "resetDeviceOrientation");
+      setDeviceOrientation(SCREEN_ORIENTATION_0);
+  }
 }

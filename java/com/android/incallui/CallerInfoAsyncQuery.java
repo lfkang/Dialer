@@ -480,6 +480,9 @@ public class CallerInfoAsyncQuery {
             // Note we're setting the phone number here (refer to javadoc
             // comments at the top of CallerInfo class).
             mCallerInfo = new CallerInfo().markAsEmergency(mQueryContext);
+            /// M: always set phone number to avoid re-duplicative queries @{
+            mCallerInfo.phoneNumber = cw.number;
+            /// @}
           } else if (cw.event == EVENT_VOICEMAIL_NUMBER) {
             mCallerInfo = new CallerInfo().markAsVoiceMail(mQueryContext);
           } else {

@@ -22,24 +22,46 @@
       android:src="@drawable/quantum_ic_call_white_18"
       android:contentDescription="@null"/>
 
-    <TextView
-      android:id="@+id/hold_contact_name"
-      style="@style/Dialer.Incall.TextAppearance"
-      android:layout_width="0dp"
-      android:layout_height="wrap_content"
-      android:layout_weight="1"
-      android:layout_marginStart="8dp"
-      android:layout_marginEnd="24dp"
-      android:ellipsize="end"
-      android:singleLine="true"
-      android:textColor="@android:color/white"
-      tools:text="Jake Peralta Really Longname"/>
+    <!-- M: show SIM infor for hold call. @{ -->
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:orientation="vertical" >
 
+        <TextView
+            android:id="@+id/hold_contact_name"
+            style="@style/Dialer.Incall.TextAppearance"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginEnd="24dp"
+            android:layout_marginStart="8dp"
+            android:layout_weight="1"
+            android:ellipsize="end"
+            android:singleLine="true"
+            android:textColor="@android:color/white"
+            tools:text="Jake Peralta Really Longname" />
+
+        <TextView
+            android:id="@+id/call_provider_name"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginEnd="24dp"
+            android:layout_marginStart="8dp"
+            android:ellipsize="end"
+            android:singleLine="true"
+            android:textColor="@android:color/white"
+             />
+    </LinearLayout>
+    <!-- @} -->
+    <!-- M: CTA custome hold string @{-->
     <TextView
+      android:id="@+id/secondary_call_status"
       style="@style/Dialer.Incall.TextAppearance"
       android:layout_width="wrap_content"
       android:layout_height="wrap_content"
       android:textColor="@android:color/white"
       android:text="@string/incall_on_hold"/>
+    <!-- @}-->
   </LinearLayout>
 </FrameLayout>

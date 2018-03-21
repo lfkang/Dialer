@@ -151,6 +151,7 @@ public class VoicemailSettingsFragment extends PreferenceFragment
         (PreferenceScreen) findPreference(getString(R.string.voicemail_advanced_settings_key));
     Intent advancedSettingsIntent = new Intent(TelephonyManager.ACTION_CONFIGURE_VOICEMAIL);
     advancedSettingsIntent.putExtra(TelephonyManager.EXTRA_HIDE_PUBLIC_SETTINGS, true);
+    advancedSettingsIntent.putExtra(TelephonyManager.EXTRA_VOICEMAIL_NUMBER, phoneAccountHandle);
     advancedSettings.setIntent(advancedSettingsIntent);
     voicemailChangePinPreference.setOnPreferenceClickListener(
         new OnPreferenceClickListener() {

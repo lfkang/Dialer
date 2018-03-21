@@ -24,11 +24,21 @@ import android.graphics.Canvas;
 import android.graphics.PorterDuff;
 import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.Drawable;
+import android.os.PersistableBundle;
+import android.provider.CallLog.Calls;
+import android.telephony.CarrierConfigManager;
+import android.telephony.SubscriptionManager;
 import android.util.AttributeSet;
+import android.util.Log;
 import android.view.View;
+
+import com.android.dialer.app.calllog.CallLogActivity;
 import com.android.dialer.compat.AppCompatConstants;
+import com.mediatek.dialer.ext.ExtensionManager;
 import java.util.ArrayList;
 import java.util.List;
+
+import mediatek.telephony.MtkCarrierConfigManager;
 
 /**
  * View that draws one or more symbols for different types of calls (missed calls, outgoing etc).
@@ -48,8 +58,19 @@ public class CallTypeIconsView extends View {
   private boolean mShowVideo;
   private boolean mShowHd;
   private boolean mShowWifi;
-  private int mWidth;
-  private int mHeight;
+  public int mWidth;
+  public int mHeight;
+
+
+ ///:M For Plugin to show various icons as per call type
+  public boolean mShowvowifi = false;
+  public boolean mShowvolte = false;
+  public boolean mShowViWifi = false;
+
+  ///M: For customization using carrier config
+  private boolean mIsSupportCallPull = false;
+  /// M: for plugin to get call type icon
+  private Context mContext = null;
 
   public CallTypeIconsView(Context context) {
     this(context, null);
@@ -67,6 +88,16 @@ public class CallTypeIconsView extends View {
     if (sLargeResouces == null && useLargeIcons) {
       sLargeResouces = new Resources(context, true);
     }
+    ///M: For customization using carrier config
+    CarrierConfigManager configMgr = (CarrierConfigManager) context
+                          .getSystemService(Context.CARRIER_CONFIG_SERVICE);
+    PersistableBundle carrierConfig =
+            configMgr.getConfigForSubId(SubscriptionManager.getDefaultVoiceSubscriptionId());
+    if (carrierConfig != null) {
+        mIsSupportCallPull = carrierConfig.getBoolean(
+          MtkCarrierConfigManager.MTK_KEY_DIALER_CALL_PULL_BOOL);
+    }
+    mContext = context;
   }
 
   public void clear() {
@@ -136,6 +167,27 @@ public class CallTypeIconsView extends View {
 
   private Drawable getCallTypeDrawable(int callType) {
     Resources resources = useLargeIcons ? sLargeResouces : sResources;
+
+    /// M: for plugin in to get call type icon@{
+    Drawable drawable = ExtensionManager.getCallLogExtension()
+        .getCallTypeDrawable(callType, useLargeIcons, mContext);
+    if (drawable != null) {
+      return drawable;
+    }/// @}
+
+    ///M: For customization using carrier config
+    boolean isCallPulledType = true;
+    if (mIsSupportCallPull) {
+      Log.d("CallTypeIconsView", "Call pull supported");
+      if (callType == CallLogActivity.DECLINED_EXTERNAL_TYPE) {
+        return sResources.missed;
+      } else if (callType == CallLogActivity.INCOMING_PULLED_AWAY_TYPE) {
+        return sResources.incoming;
+      } else if (callType == CallLogActivity.OUTGOING_PULLED_AWAY_TYPE) {
+        return sResources.outgoing;
+      }
+    }
+    ///}@
     switch (callType) {
       case AppCompatConstants.CALLS_INCOMING_TYPE:
       case AppCompatConstants.CALLS_ANSWERED_EXTERNALLY_TYPE:
@@ -156,6 +208,7 @@ public class CallTypeIconsView extends View {
         return resources.missed;
     }
   }
+
 
   @Override
   protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
@@ -190,6 +243,9 @@ public class CallTypeIconsView extends View {
     if (mShowWifi) {
       left = addDrawable(canvas, resources.wifiCall, left) + resources.iconMargin;
     }
+    ///M: Plug-in call to draw Canvas for different icons ViWifi, VoLTE, VoWifi
+    ExtensionManager.getCallLogExtension().drawWifiVolteCanvas(
+                        left, canvas, this);
   }
 
   private int addDrawable(Canvas canvas, Drawable drawable, int left) {
@@ -199,7 +255,8 @@ public class CallTypeIconsView extends View {
     return right;
   }
 
-  private static class Resources {
+  /*M: change modifier to public*/
+  /*private*/public static class Resources {
 
     // Drawable representing an incoming answered call.
     public final Drawable incoming;
@@ -284,6 +341,9 @@ public class CallTypeIconsView extends View {
       wifiCall = drawable.mutate();
       wifiCall.setColorFilter(r.getColor(R.color.call_type_icon_color), PorterDuff.Mode.MULTIPLY);
 
+      ///M: Plug-in call to draw different icons ViWifi, VoLTE, VoWifi
+      ExtensionManager.getCallLogExtension().drawWifiVolteCallIcon(
+                       context.getResources().getDimensionPixelSize(R.dimen.call_type_icon_size));
       iconMargin = largeIcons ? 0 : r.getDimensionPixelSize(R.dimen.call_log_icon_margin);
     }
 

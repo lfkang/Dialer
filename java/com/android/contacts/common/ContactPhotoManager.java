@@ -32,9 +32,22 @@ import com.android.contacts.common.lettertiles.LetterTileDrawable;
 import com.android.contacts.common.util.UriUtils;
 import com.android.dialer.common.LogUtil;
 import com.android.dialer.util.PermissionsUtil;
+import com.mediatek.contacts.simcontact.LetterTileDrawableEx;
+import com.mediatek.contacts.util.ContactsCommonListUtils;
 
 /** Asynchronously loads contact photos and maintains a cache of photos. */
 public abstract class ContactPhotoManager implements ComponentCallbacks2 {
+
+  /** Contact type constants used for default letter images */
+  public static final int TYPE_PERSON = LetterTileDrawable.TYPE_PERSON;
+
+  public static final int TYPE_SPAM = LetterTileDrawable.TYPE_SPAM;
+  public static final int TYPE_BUSINESS = LetterTileDrawable.TYPE_BUSINESS;
+  public static final int TYPE_VOICEMAIL = LetterTileDrawable.TYPE_VOICEMAIL;
+  public static final int TYPE_DEFAULT = LetterTileDrawable.TYPE_DEFAULT;
+  public static final int TYPE_GENERIC_AVATAR = LetterTileDrawable.TYPE_GENERIC_AVATAR;
+  /// M: [VoLTE ConfCallLog] For conference call
+  public static final int TYPE_CONFERENCE_CALL = LetterTileDrawable.TYPE_CONFERENCE_CALL;
 
   /** Scale and offset default constants used for default letter images */
   public static final float SCALE_DEFAULT = 1.0f;
@@ -420,6 +433,18 @@ public abstract class ContactPhotoManager implements ComponentCallbacks2 {
     /** Whether or not to draw the default image as a circle, instead of as a square/rectangle. */
     public boolean isCircular = false;
 
+    /**
+     * M: The SDN sim contact's photo id.
+     * {@link LetterTileDrawableEx} use this to judge whether to draw a sdn icon for sim contact
+     */
+    public long photoId = 0;
+    /**
+     * M: The contact's sub id, for sim contact.
+     * {@link LetterTileDrawableEx} use this sub id to distinguish the sim contact and
+     * normal contact. If it is a sim contact, will draw sim icon
+     */
+    public int subId = 0;
+
     public DefaultImageRequest() {}
 
     public DefaultImageRequest(String displayName, String identifier, boolean isCircular) {
@@ -475,7 +500,14 @@ public abstract class ContactPhotoManager implements ComponentCallbacks2 {
 
     public static Drawable getDefaultImageForContact(
         Resources resources, DefaultImageRequest defaultImageRequest) {
-      final LetterTileDrawable drawable = new LetterTileDrawable(resources);
+      /**
+       * M:[MTK SIM Contacts feature]
+       * {@link LetterTileDrawableEx} not only draw normal contact avatar,
+       * but sim contact avatar icon.
+       * Original code:
+       * final LetterTileDrawable drawable = new LetterTileDrawable(resources);
+       */
+      final LetterTileDrawableEx drawable = new LetterTileDrawableEx(resources);
       final int tileShape =
           defaultImageRequest.isCircular
               ? LetterTileDrawable.SHAPE_CIRCLE
@@ -497,6 +529,8 @@ public abstract class ContactPhotoManager implements ComponentCallbacks2 {
         }
         drawable.setScale(defaultImageRequest.scale);
         drawable.setOffset(defaultImageRequest.offset);
+        /// M:[MTK SIM Contacts feature] Set SIM property to {@link LetterTileDrawableEx}.
+        drawable.setSIMProperty(defaultImageRequest);
       }
       return drawable;
     }
@@ -506,6 +540,39 @@ public abstract class ContactPhotoManager implements ComponentCallbacks2 {
         ImageView view, int extent, boolean darkTheme, DefaultImageRequest defaultImageRequest) {
       final Drawable drawable = getDefaultImageForContact(view.getResources(), defaultImageRequest);
       view.setImageDrawable(drawable);
+    }
+  }
+
+  /**
+   * M: [MTK SIM Contacts feature] copy from orignal loadDialerThumbnailOrPhoto
+   */
+  public final void loadDialerThumbnailOrPhoto(
+      QuickContactBadge badge,
+      Uri contactUri,
+      long photoId,
+      Uri photoUri,
+      String displayName,
+      int contactType,
+      int contactSimId,
+      int isSdnContact) {
+    badge.assignContactUri(contactUri);
+    badge.setOverlay(null);
+
+    String lookupKey = contactUri == null ? null : UriUtils.getLookupKeyFromUri(contactUri);
+    ContactPhotoManager.DefaultImageRequest request =
+        new ContactPhotoManager.DefaultImageRequest(
+            displayName, lookupKey, contactType, true /* isCircular */);
+    ///M:[MTK SIM Contacts feature] @{
+    request.subId = contactSimId;
+    if (isSdnContact > 0) {
+        request.photoId =  ContactsCommonListUtils.SIM_PHOTO_ID_SDN_LOCKED;
+    }
+    //request.photoId = isSdnContact;
+    ///@}
+    if (photoId == 0 && photoUri != null) {
+      loadDirectoryPhoto(badge, photoUri, false /* darkTheme */, true /* isCircular */, request);
+    } else {
+      loadThumbnail(badge, photoId, false /* darkTheme */, true /* isCircular */, request);
     }
   }
 }

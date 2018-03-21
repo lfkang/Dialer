@@ -58,6 +58,7 @@ import com.android.incallui.video.bindings.VideoBindings;
 import com.android.incallui.video.protocol.VideoCallScreen;
 import com.android.incallui.video.protocol.VideoCallScreenDelegate;
 import com.android.incallui.video.protocol.VideoCallScreenDelegateFactory;
+import com.mediatek.incallui.utils.InCallUtils;
 
 /** Version of {@link InCallActivity} that shows the new UI */
 public class InCallActivity extends TransactionSafeFragmentActivity
@@ -249,13 +250,19 @@ public class InCallActivity extends TransactionSafeFragmentActivity
     // when the activity is first created. Therefore, to ensure the screen is turned on
     // for the call waiting case, we recreate() the current activity. There should be no jank from
     // this since the screen is already off and will remain so until our new activity is up.
-    if (!isVisible()) {
-      common.onNewIntent(intent, true /* isRecreating */);
-      LogUtil.i("InCallActivity.onNewIntent", "Restarting InCallActivity to force screen on.");
-      recreate();
-    } else {
-      common.onNewIntent(intent, false /* isRecreating */);
-    }
+    /// M: If the screen is off in call waiting case, we need finish activity then start again. @{
+    //if (!isVisible()
+       /// M: ALPS03431103 fix can't add select phone account call because of incallactivity will
+       ///disconnect the call before recreat. @{
+       //&& CallList.getInstance().getIncomingCall() != null ) {
+       ///@}
+      //common.onNewIntent(intent, true /* isRecreating */);
+      //LogUtil.i("InCallActivity.onNewIntent", "Restarting InCallActivity to force screen on.");
+      //recreate();
+    //} else {
+    common.onNewIntent(intent, false /* isRecreating */);
+    //}
+    ///@}
   }
 
   @Override
@@ -301,7 +308,13 @@ public class InCallActivity extends TransactionSafeFragmentActivity
     if (didChange) {
       // Note:  onInCallScreenDialpadVisibilityChange is called here to ensure that the dialpad FAB
       // repositions itself.
-      getInCallScreen().onInCallScreenDialpadVisibilityChange(show);
+      /// M: support show dialpad for video call too. @{
+      if (didShowInCallScreen) {
+        getInCallScreen().onInCallScreenDialpadVisibilityChange(show);
+      } else if (didShowVideoCallScreen) {
+        getVideoCallScreen().onVideoCallScreenDialpadVisibilityChange(show);
+      }
+      /// @}
     }
     return didChange;
   }
@@ -322,6 +335,11 @@ public class InCallActivity extends TransactionSafeFragmentActivity
     } else {
       LogUtil.v("InCallActivity.onForegroundCallChanged", "resetting background color");
       updateWindowBackgroundColor(0);
+      /// M: ALPS03673734, update dialpad color @{
+      if (common.isDialpadVisible()) {
+        common.getDialpadFragment().updateColors();
+      }
+      /// @}
     }
   }
 
@@ -425,15 +443,26 @@ public class InCallActivity extends TransactionSafeFragmentActivity
 
   @Nullable
   public FragmentManager getDialpadFragmentManager() {
+    /// M: supoort show dialpad for video call. @{
     InCallScreen inCallScreen = getInCallScreen();
-    if (inCallScreen != null) {
+    VideoCallScreen videoCallScreen = getVideoCallScreen();
+    if (didShowInCallScreen && inCallScreen != null) {
       return inCallScreen.getInCallScreenFragment().getChildFragmentManager();
+    } else if (didShowVideoCallScreen && videoCallScreen != null){
+      return videoCallScreen.getVideoCallScreenFragment().getChildFragmentManager();
     }
+    /// @}
     return null;
   }
 
   public int getDialpadContainerId() {
-    return getInCallScreen().getAnswerAndDialpadContainerResourceId();
+    /// M: supoort show dialpad for video call. @{
+    if (didShowInCallScreen) {
+      return getInCallScreen().getAnswerAndDialpadContainerResourceId();
+    } else {
+      return getVideoCallScreen().getDialpadContainerResourceId();
+    }
+    /// @}
   }
 
   @Override
@@ -476,7 +505,7 @@ public class InCallActivity extends TransactionSafeFragmentActivity
   }
 
   public void onPrimaryCallStateChanged() {
-    LogUtil.i("InCallActivity.onPrimaryCallStateChanged", "");
+    LogUtil.d("InCallActivity.onPrimaryCallStateChanged", "");
     showMainInCallFragment();
   }
 
@@ -529,7 +558,7 @@ public class InCallActivity extends TransactionSafeFragmentActivity
     isInShowMainInCallFragment = true;
     ShouldShowUiResult shouldShowAnswerUi = getShouldShowAnswerUi();
     ShouldShowUiResult shouldShowVideoUi = getShouldShowVideoUi();
-    LogUtil.i(
+    LogUtil.d(
         "InCallActivity.showMainInCallFragment",
         "shouldShowAnswerUi: %b, shouldShowVideoUi: %b, "
             + "didShowAnswerScreen: %b, didShowInCallScreen: %b, didShowVideoCallScreen: %b",
@@ -538,9 +567,18 @@ public class InCallActivity extends TransactionSafeFragmentActivity
         didShowAnswerScreen,
         didShowInCallScreen,
         didShowVideoCallScreen);
+    /// M:[ALPS03482828] modify allow orientation conditions.incallactivity and videocallpresenter
+    ///have conflicts on allow orientation.keep incallactivity and videocallpresenter have same
+    ///conditions. @{
+    /// Google original code:@{
     // Only video call ui allows orientation change.
-    setAllowOrientationChange(shouldShowVideoUi.shouldShow);
-
+    //setAllowOrientationChange(shouldShowVideoUi.shouldShow);
+    ///@}
+    setAllowOrientationChange(isAllowOrientation(shouldShowAnswerUi,shouldShowVideoUi));
+    ///@}
+    /// M:ALPS03538860 clear rotation when disable incallOrientationEventListner.@{
+    common.checkResetOrientation();
+    ///@}
     FragmentTransaction transaction = getSupportFragmentManager().beginTransaction();
     boolean didChangeInCall;
     boolean didChangeVideo;
@@ -553,6 +591,12 @@ public class InCallActivity extends TransactionSafeFragmentActivity
       didChangeInCall = hideInCallScreenFragment(transaction);
       didChangeVideo = showVideoCallScreenFragment(transaction, shouldShowVideoUi.call);
       didChangeAnswer = hideAnswerScreenFragment(transaction);
+    /// M: Hide incall screen when exist waiting account call. @{
+    } else if (CallList.getInstance().getWaitingForAccountCall() != null) {
+      didChangeInCall = hideInCallScreenFragment(transaction);
+      didChangeVideo = hideVideoCallScreenFragment(transaction);
+      didChangeAnswer = hideAnswerScreenFragment(transaction);
+    /// @}
     } else {
       didChangeInCall = showInCallScreenFragment(transaction);
       didChangeVideo = hideVideoCallScreenFragment(transaction);
@@ -670,11 +714,28 @@ public class InCallActivity extends TransactionSafeFragmentActivity
       LogUtil.i("InCallActivity.shouldAllowAnswerAndRelease", "no active call");
       return false;
     }
-    if (getSystemService(TelephonyManager.class).getPhoneType()
-        == TelephonyManager.PHONE_TYPE_CDMA) {
+    /// M:ALPS03415796.When CT insert slot 0 and CMCC insert slot 1,TelephonyManager.getphoneType()
+    ///will alway get CDMA.the cdma Call don't support the operation of AnswerAndRelease.
+    ///so when there are 1A1W in CMCC card, the operation of AnswerAndRelease isn't support.
+    ///that's no right.Use the right function instead of TelephonyManager.getphoneType(). @{
+    ///Google original code:
+    /*if (getSystemService(TelephonyManager.class).getPhoneType()
+        == TelephonyManager.PHONE_TYPE_CDMA) {*/
+    if (InCallUtils.isCdmaCall(call) == true) {
+    ///@}
       LogUtil.i("InCallActivity.shouldAllowAnswerAndRelease", "PHONE_TYPE_CDMA not supported");
       return false;
     }
+    //// M:[ALPS03469461] fix show wrong answer button when active call and waitting call come from
+    ////different phone account,answer screen shounldn't show answer and hold ongoing call. @{
+    if (InCallUtils.isCdmaCall(CallList.getInstance().getActiveCall())) {
+    ///@}
+      LogUtil.i("InCallActivity.shouldAllowAnswerAndRelease", "active call and waiting call is"
+              + " different phone account");
+      return false;
+    }
+    ///@}
+
     if (call.isVideoCall() || call.hasReceivedVideoUpgradeRequest()) {
       LogUtil.i("InCallActivity.shouldAllowAnswerAndRelease", "video call");
       return false;
@@ -704,8 +765,17 @@ public class InCallActivity extends TransactionSafeFragmentActivity
     if (didShowInCallScreen) {
       return false;
     }
-    InCallScreen inCallScreen = InCallBindings.createInCallScreen();
-    transaction.add(R.id.main, inCallScreen.getInCallScreenFragment(), TAG_IN_CALL_SCREEN);
+    //// M:ALPS03535093 Shall not remove old screen, otherwise mut state may be lost. @{
+    //// InCallScreen inCallScreen = InCallBindings.createInCallScreen();
+    //// transaction.add(R.id.main, inCallScreen.getInCallScreenFragment(), TAG_IN_CALL_SCREEN);
+    InCallScreen inCallScreen = getInCallScreen();
+    if (inCallScreen == null) {
+      inCallScreen = InCallBindings.createInCallScreen();
+      transaction.add(R.id.main, inCallScreen.getInCallScreenFragment(), TAG_IN_CALL_SCREEN);
+    } else {
+      transaction.show(inCallScreen.getInCallScreenFragment());
+    }
+    ///@}
     Logger.get(this).logScreenView(ScreenEvent.Type.INCALL, this);
     didShowInCallScreen = true;
     return true;
@@ -717,7 +787,10 @@ public class InCallActivity extends TransactionSafeFragmentActivity
     }
     InCallScreen inCallScreen = getInCallScreen();
     if (inCallScreen != null) {
-      transaction.remove(inCallScreen.getInCallScreenFragment());
+      //// M:ALPS03535093 Shall not remove old screen, otherwise mut state may be lost. @{
+      //// transaction.remove(inCallScreen.getInCallScreenFragment());
+      transaction.hide(inCallScreen.getInCallScreenFragment());
+      /// @}
     }
     didShowInCallScreen = false;
     return true;
@@ -812,4 +885,29 @@ public class InCallActivity extends TransactionSafeFragmentActivity
       this.call = call;
     }
   }
+
+  /// M:[ALPS03482828] modify allow orientation conditions.incallactivity and videocallpresenter
+  ///have conflicts on allow orientation.keep incallactivity and videocallpresenter have same
+  ///conditions. in the following case,it will allow orientation:
+  ///1.active video call 2.send or recevie upgrade request .@{
+  private boolean isAllowOrientation(ShouldShowUiResult answerUi,ShouldShowUiResult videoUi) {
+   DialerCall mcall;
+   if(answerUi.shouldShow) {
+     mcall = answerUi.call;
+     if (mcall != null && mcall.hasReceivedVideoUpgradeRequest()) {
+       LogUtil.d("InCallActivity.isAllowOrientation ","is true");
+       return true;
+     }
+   } else if (videoUi.shouldShow) {
+     mcall = videoUi.call;
+     if (mcall != null && mcall.isVideoCall() && mcall.getState() != DialerCall.State.ACTIVE) {
+       return false;
+     } else {
+       LogUtil.d("InCallActivity.isAllowOrientation ","is true");
+       return true;
+     }
+   }
+   return false;
+  }
+  ///@}
 }

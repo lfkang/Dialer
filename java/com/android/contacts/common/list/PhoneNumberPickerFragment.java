@@ -48,6 +48,8 @@ import java.util.Set;
 import org.json.JSONException;
 import org.json.JSONObject;
 
+import com.android.dialer.util.DialerUtils;
+
 /** Fragment containing a phone number list for picking. */
 public class PhoneNumberPickerFragment extends ContactEntryListFragment<ContactEntryListAdapter>
     implements PhoneNumberListAdapter.Listener, EnrichedCallManager.CapabilitiesListener {
@@ -87,6 +89,7 @@ public class PhoneNumberPickerFragment extends ContactEntryListFragment<ContactE
   @Override
   public void onVideoCallIconClicked(int position) {
     Logger.get(getContext()).logImpression(DialerImpression.Type.IMS_VIDEO_REQUESTED_FROM_SEARCH);
+    DialerUtils.hideInputMethod(getView());
     callNumber(position, true /* isVideoCall */);
   }
 

@@ -735,6 +735,9 @@ public class SurfaceViewVideoCallFragment extends Fragment
     } else if (buttonId == InCallButtonIds.BUTTON_MUTE) {
       muteButton.setEnabled(show);
     } else if (buttonId == InCallButtonIds.BUTTON_PAUSE_VIDEO) {
+      /// M : hide pause @{
+      cameraOffButton.setVisibility(show ? View.VISIBLE : View.GONE);
+      /// @}
       cameraOffButton.setEnabled(show);
     } else if (buttonId == InCallButtonIds.BUTTON_SWITCH_TO_SECONDARY) {
       switchOnHoldCallController.setVisible(show);
@@ -1060,5 +1063,33 @@ public class SurfaceViewVideoCallFragment extends Fragment
         videoCallScreenDelegate.onCameraPermissionGranted();
       }
     }
+  }
+
+  /// M: ------------------------- Mediatek feature ---------------------------
+  @Override
+  public void hidePreview(boolean hide) {
+  }
+  @Override
+  public void updateDeclineTimer() {
+    // do nothing
+  }
+
+  @Override
+  public void updateVideoDebugInfo(long dataUsage) {
+  }
+
+  @Override
+  public void updateRecordStateUi(boolean isRecording) {
+    // do nothing
+  }
+
+  @Override
+  public int getDialpadContainerResourceId() {
+    return 0;
+  }
+
+  @Override
+  public void onVideoCallScreenDialpadVisibilityChange(boolean isShowing) {
+   // do nothing
   }
 }

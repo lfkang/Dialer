@@ -25,7 +25,7 @@ public interface VideoCallScreenDelegate {
 
   void initVideoCallScreenDelegate(Context context, VideoCallScreen videoCallScreen);
 
-  void onVideoCallScreenUiReady();
+  void onVideoCallScreenUiReady(VideoCallScreen videoCallScreen);
 
   void onVideoCallScreenUiUnready();
 
@@ -41,6 +41,16 @@ public interface VideoCallScreenDelegate {
 
   void onCameraPermissionDialogShown();
 
+  void onReadStoragePermissionResponse(boolean isGranted);
+
+  void setPauseImage();
+
+  boolean shallTransmitStaticImage();
+
+  boolean isUseDefaultImage();
+
+  void setUseDefaultImage(boolean useDefaultImage);
+
   VideoSurfaceTexture getLocalVideoSurfaceTexture();
 
   VideoSurfaceTexture getRemoteVideoSurfaceTexture();
@@ -48,4 +58,5 @@ public interface VideoCallScreenDelegate {
   void setSurfaceViews(SurfaceView preview, SurfaceView remote);
 
   int getDeviceOrientation();
+
 }

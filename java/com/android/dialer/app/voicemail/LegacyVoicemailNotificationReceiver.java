@@ -28,6 +28,7 @@ import android.support.v4.os.BuildCompat;
 import android.support.v4.os.UserManagerCompat;
 import android.telecom.PhoneAccountHandle;
 import android.telephony.TelephonyManager;
+import com.android.contacts.common.compat.TelephonyManagerCompat;
 import com.android.dialer.app.calllog.LegacyVoicemailNotifier;
 import com.android.dialer.common.Assert;
 import com.android.dialer.common.LogUtil;
@@ -43,6 +44,10 @@ import com.android.voicemail.VoicemailComponent;
 public class LegacyVoicemailNotificationReceiver extends BroadcastReceiver {
 
   private static final String LEGACY_VOICEMAIL_COUNT = "legacy_voicemail_count";
+  // TS 23.040 9.2.3.24.2
+  // "The value 255 shall be taken to mean 255 or greater"
+  // If voice mail present indication is received CPHS only: count is unknown VoiceMailCount = 255
+  private static final int MAX_VOICEMAILS_COUNT = 0xff;
 
   /**
    * Hidden extra for {@link TelephonyManager#ACTION_SHOW_VOICEMAIL_NOTIFICATION} for whether the
@@ -52,6 +57,9 @@ public class LegacyVoicemailNotificationReceiver extends BroadcastReceiver {
    * <p>TODO(b/62202833): make public
    */
   private static final String EXTRA_IS_REFRESH = "is_refresh";
+
+  // Phone id for which voicemail notification update received
+  private static final String EXTRA_SUB_ID = "sub_id";
 
   @Override
   public void onReceive(Context context, Intent intent) {
@@ -72,8 +80,11 @@ public class LegacyVoicemailNotificationReceiver extends BroadcastReceiver {
     PhoneAccountHandle phoneAccountHandle =
         Assert.isNotNull(intent.getParcelableExtra(TelephonyManager.EXTRA_PHONE_ACCOUNT_HANDLE));
     int count = intent.getIntExtra(TelephonyManager.EXTRA_NOTIFICATION_COUNT, -1);
+    boolean isRefresh = intent.getBooleanExtra(TelephonyManagerCompat.EXTRA_IS_REFRESH, false);
+    int subId =  intent.getIntExtra(EXTRA_SUB_ID, -1);
 
-    if (!hasVoicemailCountChanged(context, phoneAccountHandle, count)) {
+    if (!isRefresh && (count != MAX_VOICEMAILS_COUNT)
+        && !hasVoicemailCountChanged(context, phoneAccountHandle, count)) {
       LogUtil.i(
           "LegacyVoicemailNotificationReceiver.onReceive",
           "voicemail count hasn't changed, ignoring");
@@ -89,7 +100,7 @@ public class LegacyVoicemailNotificationReceiver extends BroadcastReceiver {
 
     if (count == 0) {
       LogUtil.i("LegacyVoicemailNotificationReceiver.onReceive", "clearing notification");
-      LegacyVoicemailNotifier.cancelNotification(context);
+      LegacyVoicemailNotifier.cancelNotification(context, subId);
       return;
     }
 
@@ -116,7 +127,8 @@ public class LegacyVoicemailNotificationReceiver extends BroadcastReceiver {
         voicemailNumber,
         callVoicemailIntent,
         voicemailSettingIntent,
-        intent.getBooleanExtra(EXTRA_IS_REFRESH, false));
+        isRefresh,
+        subId);
   }
 
   private static boolean hasVoicemailCountChanged(

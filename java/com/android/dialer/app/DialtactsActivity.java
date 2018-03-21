@@ -126,6 +126,7 @@ import com.android.dialer.util.PermissionsUtil;
 import com.android.dialer.util.TouchPointManager;
 import com.android.dialer.util.TransactionSafeActivity;
 import com.android.dialer.util.ViewUtil;
+import com.android.incallui.QtiCallUtils;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -239,6 +240,9 @@ public class DialtactsActivity extends TransactionSafeActivity
   private FloatingActionButtonController mFloatingActionButtonController;
   private boolean mWasConfigurationChange;
   private long timeTabSelected;
+
+  private PhoneNumberInteraction mPhoneNumberInteraction;
+  private Uri mUri;
 
   private P13nLogger mP13nLogger;
   private P13nRanker mP13nRanker;
@@ -754,6 +758,14 @@ public class DialtactsActivity extends TransactionSafeActivity
       handleMenuSettings();
       Logger.get(this).logScreenView(ScreenEvent.Type.SETTINGS, this);
       return true;
+    } else if (resId == R.id.menu_4g_conference_call) {
+      try {
+       QtiCallUtils.openConferenceUriDialerOr4gConferenceDialer(this);
+      } catch (ActivityNotFoundException e) {
+        LogUtil.e("DialtactsActivity.onMenuItemClick", "Activity not found. " + e);
+      } finally {
+        return true;
+      }
     } else if (resId == R.id.menu_new_ui_launcher_shortcut) {
       MainComponent.get(this).getMain().createNewUiLauncherShortcut(this);
       return true;
@@ -1430,8 +1442,9 @@ public class DialtactsActivity extends TransactionSafeActivity
   public void onPickDataUri(
       Uri dataUri, boolean isVideoCall, CallSpecificAppData callSpecificAppData) {
     mClearSearchOnPause = true;
-    PhoneNumberInteraction.startInteractionForPhoneCall(
-        DialtactsActivity.this, dataUri, isVideoCall, callSpecificAppData);
+    mUri = dataUri;
+    mPhoneNumberInteraction = PhoneNumberInteraction.startInteractionForPhoneCall(
+        DialtactsActivity.this, mUri, isVideoCall, callSpecificAppData);
   }
 
   @Override
@@ -1551,15 +1564,15 @@ public class DialtactsActivity extends TransactionSafeActivity
   @Override
   public void onRequestPermissionsResult(
       int requestCode, String[] permissions, int[] grantResults) {
-    // This should never happen; it should be impossible to start an interaction without the
-    // contacts permission from the Dialtacts activity.
-    Assert.fail(
-        String.format(
-            Locale.US,
-            "Permissions requested unexpectedly: %d/%s/%s",
-            requestCode,
-            Arrays.toString(permissions),
-            Arrays.toString(grantResults)));
+    //If request is cancelled, the result arrays are empty.
+    if ((requestCode == PhoneNumberInteraction.REQUEST_CALL_PHONE
+        || requestCode == PhoneNumberInteraction.REQUEST_READ_CONTACTS)
+        && grantResults.length > 0 && grantResults[0]
+        == PackageManager.PERMISSION_GRANTED)  {
+      if (mPhoneNumberInteraction != null && mUri != null) {
+        mPhoneNumberInteraction.startInteraction(mUri);
+      }
+    }
   }
 
   @Override
@@ -1600,6 +1613,10 @@ public class DialtactsActivity extends TransactionSafeActivity
       } else {
         simulatorMenuItem.setVisible(false);
       }
+
+      final MenuItem conferDialerOption = menu.findItem(R.id.menu_4g_conference_call);
+      conferDialerOption.setVisible(
+          QtiCallUtils.show4gConferenceDialerMenuOption(getApplicationContext()));
 
       Main dialtacts = MainComponent.get(context).getMain();
       menu.findItem(R.id.menu_new_ui_launcher_shortcut)

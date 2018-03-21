@@ -59,7 +59,7 @@ public class AnswerVideoCallScreen implements VideoCallScreen {
   @Override
   public void onVideoScreenStart() {
     LogUtil.i("AnswerVideoCallScreen.onStart", null);
-    delegate.onVideoCallScreenUiReady();
+    delegate.onVideoCallScreenUiReady(this);
     delegate.getLocalVideoSurfaceTexture().attachToTextureView(textureView);
   }
 
@@ -101,6 +101,10 @@ public class AnswerVideoCallScreen implements VideoCallScreen {
   @Override
   public Fragment getVideoCallScreenFragment() {
     return fragment;
+  }
+
+  @Override
+  public void onRequestReadStoragePermission() {
   }
 
   @NonNull

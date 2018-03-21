@@ -32,6 +32,7 @@ import com.android.dialer.logging.Logger;
 import com.android.dialer.notification.NotificationChannelManager;
 import com.android.voicemail.VoicemailClient;
 import com.android.voicemail.VoicemailComponent;
+import com.android.voicemail.impl.SubscriptionInfoHelper;
 import com.android.voicemail.impl.OmtpVvmCarrierConfigHelper;
 import com.android.voicemail.impl.R;
 import com.android.voicemail.impl.VvmLog;
@@ -55,6 +56,7 @@ public class VoicemailSettingsFragment extends PreferenceFragment
   private SwitchPreference autoArchiveSwitchPreference;
   private Preference voicemailChangePinPreference;
   private PreferenceScreen advancedSettings;
+  private SubscriptionInfoHelper subscriptionInfoHelper;
 
   @Override
   public void onCreate(Bundle icicle) {
@@ -62,6 +64,7 @@ public class VoicemailSettingsFragment extends PreferenceFragment
 
     phoneAccountHandle =
         Assert.isNotNull(getArguments().getParcelable(VoicemailClient.PARAM_PHONE_ACCOUNT_HANDLE));
+    subscriptionInfoHelper = new SubscriptionInfoHelper(getActivity(), phoneAccountHandle);
 
     omtpVvmCarrierConfigHelper = new OmtpVvmCarrierConfigHelper(getContext(), phoneAccountHandle);
   }
@@ -149,7 +152,7 @@ public class VoicemailSettingsFragment extends PreferenceFragment
 
     advancedSettings =
         (PreferenceScreen) findPreference(getString(R.string.voicemail_advanced_settings_key));
-    Intent advancedSettingsIntent = new Intent(TelephonyManager.ACTION_CONFIGURE_VOICEMAIL);
+    Intent advancedSettingsIntent = subscriptionInfoHelper.getConfiguringVoiceMailIntent();
     advancedSettingsIntent.putExtra(TelephonyManager.EXTRA_HIDE_PUBLIC_SETTINGS, true);
     advancedSettings.setIntent(advancedSettingsIntent);
     voicemailChangePinPreference.setOnPreferenceClickListener(

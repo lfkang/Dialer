@@ -21,6 +21,7 @@ import android.os.Bundle;
 import android.support.v4.app.Fragment;
 import android.support.v4.os.UserManagerCompat;
 import android.telecom.CallAudioState;
+import android.widget.Toast;
 import com.android.contacts.common.compat.CallCompat;
 import com.android.dialer.common.Assert;
 import com.android.dialer.common.LogUtil;
@@ -29,6 +30,7 @@ import com.android.dialer.logging.Logger;
 import com.android.incallui.InCallCameraManager.Listener;
 import com.android.incallui.InCallPresenter.CanAddCallListener;
 import com.android.incallui.InCallPresenter.InCallDetailsListener;
+import com.android.incallui.InCallPresenter.InCallEventListener;
 import com.android.incallui.InCallPresenter.InCallState;
 import com.android.incallui.InCallPresenter.InCallStateListener;
 import com.android.incallui.InCallPresenter.IncomingCallListener;
@@ -41,7 +43,9 @@ import com.android.incallui.call.TelecomAdapter;
 import com.android.incallui.incall.protocol.InCallButtonIds;
 import com.android.incallui.incall.protocol.InCallButtonUi;
 import com.android.incallui.incall.protocol.InCallButtonUiDelegate;
+import com.android.incallui.videotech.utils.SessionModificationState;
 import com.android.incallui.videotech.utils.VideoUtils;
+import org.codeaurora.ims.utils.QtiImsExtUtils;
 
 /** Logic for call buttons. */
 public class CallButtonPresenter
@@ -49,6 +53,7 @@ public class CallButtonPresenter
         AudioModeListener,
         IncomingCallListener,
         InCallDetailsListener,
+        InCallEventListener,
         CanAddCallListener,
         Listener,
         InCallButtonUiDelegate {
@@ -62,6 +67,7 @@ public class CallButtonPresenter
   private boolean mAutomaticallyMuted = false;
   private boolean mPreviousMuteState = false;
   private boolean isInCallButtonUiReady;
+  private static final int MAX_PARTICIPANTS_LIMIT = 6;
 
   public CallButtonPresenter(Context context) {
     mContext = context.getApplicationContext();
@@ -78,6 +84,7 @@ public class CallButtonPresenter
     inCallPresenter.addListener(this);
     inCallPresenter.addIncomingCallListener(this);
     inCallPresenter.addDetailsListener(this);
+    inCallPresenter.addInCallEventListener(this);
     inCallPresenter.addCanAddCallListener(this);
     inCallPresenter.getInCallCameraManager().addCameraSelectionListener(this);
 
@@ -94,6 +101,7 @@ public class CallButtonPresenter
     AudioModeProvider.getInstance().removeListener(this);
     InCallPresenter.getInstance().removeIncomingCallListener(this);
     InCallPresenter.getInstance().removeDetailsListener(this);
+    InCallPresenter.getInstance().removeInCallEventListener(this);
     InCallPresenter.getInstance().getInCallCameraManager().removeCameraSelectionListener(this);
     InCallPresenter.getInstance().removeCanAddCallListener(this);
     isInCallButtonUiReady = false;
@@ -188,20 +196,21 @@ public class CallButtonPresenter
     }
 
     int newRoute;
+    String INVALID_CALL_PARAM = "-1";
     if (audioState.getRoute() == CallAudioState.ROUTE_SPEAKER) {
       newRoute = CallAudioState.ROUTE_WIRED_OR_EARPIECE;
       Logger.get(mContext)
           .logCallImpression(
               DialerImpression.Type.IN_CALL_SCREEN_TURN_ON_WIRED_OR_EARPIECE,
-              mCall.getUniqueCallId(),
-              mCall.getTimeAddedMs());
+              (mCall != null) ? mCall.getUniqueCallId() : INVALID_CALL_PARAM,
+              (mCall != null) ? mCall.getTimeAddedMs() : Long.parseLong(INVALID_CALL_PARAM));
     } else {
       newRoute = CallAudioState.ROUTE_SPEAKER;
       Logger.get(mContext)
           .logCallImpression(
               DialerImpression.Type.IN_CALL_SCREEN_TURN_ON_SPEAKERPHONE,
-              mCall.getUniqueCallId(),
-              mCall.getTimeAddedMs());
+              (mCall != null) ? mCall.getUniqueCallId() : INVALID_CALL_PARAM,
+              (mCall != null) ? mCall.getTimeAddedMs() : Long.parseLong(INVALID_CALL_PARAM));
     }
 
     setAudioRoute(newRoute);
@@ -211,7 +220,7 @@ public class CallButtonPresenter
   public void muteClicked(boolean checked, boolean clickedByUser) {
     LogUtil.i(
         "CallButtonPresenter", "turning on mute: %s, clicked by user: %s", checked, clickedByUser);
-    if (clickedByUser) {
+    if (clickedByUser && mCall != null) {
       Logger.get(mContext)
           .logCallImpression(
               checked
@@ -249,6 +258,28 @@ public class CallButtonPresenter
 
   @Override
   public void mergeClicked() {
+    if (mCall == null) {
+        return;
+    }
+
+    if (QtiImsExtUtils.isCarrierConfigEnabled(BottomSheetHelper.getInstance().getPhoneId(),
+            mContext,"config_conference_call_show_participant_status")) {
+        int participantsCount = 0;
+        if (mCall.isConferenceCall()) {
+            participantsCount = mCall.getChildCallIds().size();
+        } else {
+            DialerCall backgroundCall = CallList.getInstance().getBackgroundCall();
+            if (backgroundCall != null && backgroundCall.isConferenceCall()) {
+                participantsCount = backgroundCall.getChildCallIds().size();
+            }
+        }
+        Log.i(this, "Number of participantsCount is " + participantsCount);
+        if (participantsCount >= MAX_PARTICIPANTS_LIMIT) {
+            Toast.makeText(mContext,
+                    R.string.too_many_recipients, Toast.LENGTH_SHORT).show();
+            return;
+        }
+    }
     TelecomAdapter.getInstance().merge(mCall.getId());
   }
 
@@ -305,6 +336,10 @@ public class CallButtonPresenter
 
   @Override
   public void toggleCameraClicked() {
+    if (mCall == null) {
+      return;
+    }
+
     LogUtil.i("CallButtonPresenter.toggleCameraClicked", "");
     if (mCall == null) {
       return;
@@ -402,15 +437,19 @@ public class CallButtonPresenter
     final boolean showSwap = call.can(android.telecom.Call.Details.CAPABILITY_SWAP_CONFERENCE);
     final boolean showHold =
         !showSwap
+            && !call.hasSentVideoUpgradeRequest()
             && call.can(android.telecom.Call.Details.CAPABILITY_SUPPORT_HOLD)
             && call.can(android.telecom.Call.Details.CAPABILITY_HOLD);
     final boolean isCallOnHold = call.getState() == DialerCall.State.ONHOLD;
 
     final boolean showAddCall =
-        TelecomAdapter.getInstance().canAddCall() && UserManagerCompat.isUserUnlocked(mContext);
-    final boolean showMerge = call.can(android.telecom.Call.Details.CAPABILITY_MERGE_CONFERENCE);
-    final boolean showUpgradeToVideo = !isVideo && (hasVideoCallCapabilities(call));
-    final boolean showDowngradeToAudio = isVideo && isDowngradeToAudioSupported(call);
+        TelecomAdapter.getInstance().canAddCall() && UserManagerCompat.isUserUnlocked(mContext)
+            && !call.hasSentVideoUpgradeRequest();
+    final boolean showMerge = call.can(android.telecom.Call.Details.CAPABILITY_MERGE_CONFERENCE)
+        && !call.hasSentVideoUpgradeRequest();
+    final boolean useExt = QtiCallUtils.useExt(mContext);
+    final boolean showUpgradeToVideo = !isVideo && (hasVideoCallCapabilities(call)) && !useExt;
+    final boolean showDowngradeToAudio = isVideo && isDowngradeToAudioSupported(call) && !useExt;
     final boolean showMute = call.can(android.telecom.Call.Details.CAPABILITY_MUTE);
 
     final boolean hasCameraPermission =
@@ -420,18 +459,19 @@ public class CallButtonPresenter
         isVideo
             && call.getState() != DialerCall.State.DIALING
             && call.getState() != DialerCall.State.CONNECTING;
-
     mInCallButtonUi.showButton(InCallButtonIds.BUTTON_AUDIO, true);
     mInCallButtonUi.showButton(InCallButtonIds.BUTTON_SWAP, showSwap);
     mInCallButtonUi.showButton(InCallButtonIds.BUTTON_HOLD, showHold);
     mInCallButtonUi.setHold(isCallOnHold);
     mInCallButtonUi.showButton(InCallButtonIds.BUTTON_MUTE, showMute);
-    mInCallButtonUi.showButton(InCallButtonIds.BUTTON_ADD_CALL, true);
+    mInCallButtonUi.showButton(InCallButtonIds.BUTTON_ADD_CALL, showAddCall);
     mInCallButtonUi.enableButton(InCallButtonIds.BUTTON_ADD_CALL, showAddCall);
     mInCallButtonUi.showButton(InCallButtonIds.BUTTON_UPGRADE_TO_VIDEO, showUpgradeToVideo);
     mInCallButtonUi.showButton(InCallButtonIds.BUTTON_DOWNGRADE_TO_AUDIO, showDowngradeToAudio);
     mInCallButtonUi.showButton(
-        InCallButtonIds.BUTTON_SWITCH_CAMERA, isVideo && hasCameraPermission);
+      InCallButtonIds.BUTTON_SWITCH_CAMERA, VideoCallPresenter.isTransmissionEnabled(call)
+      && hasCameraPermission && !BottomSheetHelper.getInstance().isHideMeSelected()
+      && !QtiCallUtils.hasVideoCrbtVoLteCall(mContext, call));
     mInCallButtonUi.showButton(InCallButtonIds.BUTTON_PAUSE_VIDEO, showPauseVideo);
     if (isVideo) {
       mInCallButtonUi.setVideoPaused(!call.getVideoTech().isTransmitting() || !hasCameraPermission);
@@ -440,6 +480,9 @@ public class CallButtonPresenter
     mInCallButtonUi.showButton(InCallButtonIds.BUTTON_MERGE, showMerge);
 
     mInCallButtonUi.updateButtonStates();
+    if (BottomSheetHelper.getInstance().shallShowMoreButton(getActivity())) {
+      BottomSheetHelper.getInstance().updateMap();
+    }
   }
 
   private boolean hasVideoCallCapabilities(DialerCall call) {
@@ -457,6 +500,37 @@ public class CallButtonPresenter
   private boolean isDowngradeToAudioSupported(DialerCall call) {
     // TODO(b/33676907): If there is an RCS video share session, return true here
     return !call.can(CallCompat.Details.CAPABILITY_CANNOT_DOWNGRADE_VIDEO_TO_AUDIO);
+  }
+
+  /**
+   * Handles a change to the video call hide me selection
+   *
+   * @param shallTransmitStaticImage {@code true} if the app should show static image in preview,
+   * {@code false} otherwise.
+   */
+  @Override
+  public void onSendStaticImageStateChanged(boolean shallTransmitStaticImage) {
+    if (mCall == null || !QtiImsExtUtils.shallShowStaticImageUi(
+         BottomSheetHelper.getInstance().getPhoneId(), mContext)) {
+       return;
+     }
+
+     updateButtonsState(mCall);
+  }
+
+  @Override
+  public void onFullscreenModeChanged(boolean isFullscreenMode) {
+  }
+
+  @Override
+  public void onSessionModificationStateChange(DialerCall call) {
+    if (mInCallButtonUi != null && call != null && call.equals(mCall)) {
+      int sessionModifyState = call.getVideoTech().getSessionModificationState();
+      if (sessionModifyState == SessionModificationState.WAITING_FOR_UPGRADE_TO_VIDEO_RESPONSE ||
+          sessionModifyState == SessionModificationState.NO_REQUEST) {
+        updateButtonsState(call);
+      }
+    }
   }
 
   @Override

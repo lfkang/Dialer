@@ -41,6 +41,11 @@ import com.android.dialer.postcall.PostCall;
 import com.android.dialer.protos.ProtoParsers;
 import java.util.List;
 
+//TINNO BEGIN
+// FEATURE_SMART_GESTURE chenqi.zhao 20171114
+import com.tinno.feature.FeatureMBA;
+//TINNO END
+
 /** Displays the details of a specific call log entry. */
 public class CallDetailsActivity extends AppCompatActivity
     implements OnMenuItemClickListener, CallDetailsFooterViewHolder.ReportCallIdListener {
@@ -51,6 +56,10 @@ public class CallDetailsActivity extends AppCompatActivity
   private static final String EXTRA_CONTACT = "contact";
   private static final String EXTRA_CAN_REPORT_CALLER_ID = "can_report_caller_id";
   private static final String TASK_DELETE = "task_delete";
+  //TINNO BEGIN
+  //FEATURE_SMARTGESTURE <体感拨号> chenqi.zhao 20171114
+  private static String mNumber;
+  //TINNO END
 
   private List<CallDetailsEntry> entries;
   private DialerContact contact;
@@ -67,6 +76,13 @@ public class CallDetailsActivity extends AppCompatActivity
       boolean canReportCallerId) {
     Assert.isNotNull(details);
     Assert.isNotNull(contact);
+
+    //TINNO BEGIN
+    //FEATURE_SMARTGESTURE <体感拨号> chenqi.zhao 20171114
+    if (FeatureMBA.MBA_FTR_ApeSmartGesture_REQC1194) {
+      mNumber = contact.getNumber();
+    }
+    //TINNO END
 
     Intent intent = new Intent(context, CallDetailsActivity.class);
     ProtoParsers.put(intent, EXTRA_CONTACT, contact);
@@ -94,15 +110,35 @@ public class CallDetailsActivity extends AppCompatActivity
   @Override
   protected void onResume() {
     super.onResume();
+    //TINNO BEGIN
+    //FEATURE_SMARTGESTURE <体感拨号> chenqi.zhao 20171114
+    if (FeatureMBA.MBA_FTR_ApeSmartGesture_REQC1194) {
+      if (mNumber != null && !"".equals(mNumber)) {
+        Intent intent = new Intent("android.intent.action.ACTION_PHONE_DIAL_START");
+        intent.putExtra("dialNumber", mNumber);
+        sendBroadcast(intent);
+      }
+    }
+    //TINNO END
+  }
 
-    // Some calls may not be recorded (eg. from quick contact),
+  @Override
+  protected void onPause() {
+    super.onPause();
+    //TINNO BEGIN
+    //FEATURE_SMARTGESTURE <体感拨号> chenqi.zhao 20171114
+    if (FeatureMBA.MBA_FTR_ApeSmartGesture_REQC1194) {
+      if (mNumber != null && !"".equals(mNumber)) {
+        Intent intent = new Intent("android.intent.action.ACTION_PHONE_DIAL_END");
+        sendBroadcast(intent);
+      }
+    }
+    //TINNO END
+	 // Some calls may not be recorded (eg. from quick contact),
     // so we should restart recording after these calls. (Recorded call is stopped)
     PostCall.restartPerformanceRecordingIfARecentCallExist(this);
     if (!PerformanceReport.isRecording()) {
       PerformanceReport.startRecording();
-    }
-
-    PostCall.promptUserForMessageIfNecessary(this, findViewById(R.id.recycler_view));
   }
 
   @Override

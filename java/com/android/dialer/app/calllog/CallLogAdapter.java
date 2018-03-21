@@ -21,6 +21,7 @@ import android.content.ContentUris;
 import android.content.DialogInterface;
 import android.content.DialogInterface.OnCancelListener;
 import android.content.res.Resources;
+import android.graphics.drawable.Drawable;
 import android.database.Cursor;
 import android.net.Uri;
 import android.os.AsyncTask;
@@ -70,6 +71,7 @@ import com.android.dialer.common.Assert;
 import com.android.dialer.common.LogUtil;
 import com.android.dialer.common.concurrent.AsyncTaskExecutor;
 import com.android.dialer.common.concurrent.AsyncTaskExecutors;
+import com.android.dialer.compat.AppCompatConstants;
 import com.android.dialer.configprovider.ConfigProviderBindings;
 import com.android.dialer.enrichedcall.EnrichedCallCapabilities;
 import com.android.dialer.enrichedcall.EnrichedCallComponent;
@@ -88,11 +90,13 @@ import com.android.dialer.phonenumbercache.ContactInfo;
 import com.android.dialer.phonenumbercache.ContactInfoHelper;
 import com.android.dialer.phonenumberutil.PhoneNumberHelper;
 import com.android.dialer.spam.Spam;
+import com.android.dialer.util.DialerUtils;
 import com.android.dialer.util.PermissionsUtil;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Pattern;
 import java.util.Set;
 
 /** Adapter class to fill in data for the Call Log. */
@@ -360,7 +364,8 @@ public class CallLogAdapter extends GroupingListAdapter
             mCurrentlyExpandedPosition = RecyclerView.NO_POSITION;
             mCurrentlyExpandedRowId = NO_EXPANDED_LIST_ITEM;
           } else {
-            if (viewHolder.callType == CallLog.Calls.MISSED_TYPE) {
+            if (viewHolder.callType == CallLog.Calls.MISSED_TYPE ||
+                viewHolder.callType == AppCompatConstants.MISSED_IMS_TYPE) {
               CallLogAsyncTaskUtil.markCallAsRead(mActivity, viewHolder.callIds);
               if (mActivityType == ACTIVITY_TYPE_DIALTACTS) {
                 ((DialtactsActivity) v.getContext()).updateTabUnreadCounts();
@@ -967,7 +972,8 @@ public class CallLogAdapter extends GroupingListAdapter
     views.numberPresentation = numberPresentation;
 
     if (details.callTypes[0] == CallLog.Calls.VOICEMAIL_TYPE
-        || details.callTypes[0] == CallLog.Calls.MISSED_TYPE) {
+        || details.callTypes[0] == CallLog.Calls.MISSED_TYPE
+        || details.callTypes[0] == AppCompatConstants.MISSED_IMS_TYPE) {
       details.isRead = cursor.getInt(CallLogQuery.IS_READ) == 1;
     }
     views.callType = cursor.getInt(CallLogQuery.CALL_TYPE);
@@ -980,6 +986,7 @@ public class CallLogAdapter extends GroupingListAdapter
   private static CallDetailsEntries createCallDetailsEntries(Cursor cursor, int count) {
     Assert.isMainThread();
     int position = cursor.getPosition();
+    String accountId = cursor.getString(CallLogQuery.ACCOUNT_ID);
     CallDetailsEntries.Builder entries = CallDetailsEntries.newBuilder();
     for (int i = 0; i < count; i++) {
       CallDetailsEntry.Builder entry =
@@ -989,7 +996,8 @@ public class CallLogAdapter extends GroupingListAdapter
               .setDataUsage(cursor.getLong(CallLogQuery.DATA_USAGE))
               .setDate(cursor.getLong(CallLogQuery.DATE))
               .setDuration(cursor.getLong(CallLogQuery.DURATION))
-              .setFeatures(cursor.getInt(CallLogQuery.FEATURES));
+              .setFeatures(cursor.getInt(CallLogQuery.FEATURES))
+              .setAccountId(accountId == null ? "" : accountId);
       entries.addEntries(entry.build());
       cursor.moveToNext();
     }
@@ -1011,6 +1019,12 @@ public class CallLogAdapter extends GroupingListAdapter
       return false;
     }
 
+    final String phoneNumber = details.number.toString();
+    Pattern pattern = Pattern.compile("[,;]");
+    String[] num = pattern.split(phoneNumber);
+    final String postDialDigits = details.postDialDigits;
+    final String number = DialerUtils.isConferenceURICallLog(phoneNumber, postDialDigits) ?
+        phoneNumber : num.length > 0 ? num[0] : "";
     final PhoneAccountHandle accountHandle =
         PhoneAccountUtils.getAccount(details.accountComponentName, details.accountId);
 
@@ -1026,14 +1040,19 @@ public class CallLogAdapter extends GroupingListAdapter
       // Lookup contacts with this number
       // Only do remote lookup in first 5 rows.
       int position = views.getAdapterPosition();
+      boolean isConfCallLog = num != null && num.length > 1
+          && DialerUtils.isConferenceURICallLog(phoneNumber, postDialDigits);
+      String queryNumber = isConfCallLog ? phoneNumber : number;
       info =
           mContactInfoCache.getValue(
-              details.number + details.postDialDigits,
+              queryNumber,
+              postDialDigits,
               details.countryIso,
               details.cachedContactInfo,
               position
                   < ConfigProviderBindings.get(mActivity)
-                      .getLong("number_of_call_to_do_remote_lookup", 5L));
+                      .getLong("number_of_call_to_do_remote_lookup", 5L),
+              isConfCallLog);
     }
     CharSequence formattedNumber =
         info.formattedNumber == null
@@ -1044,6 +1063,7 @@ public class CallLogAdapter extends GroupingListAdapter
     views.displayNumber = details.displayNumber;
     views.accountHandle = accountHandle;
     details.accountHandle = accountHandle;
+    details.accountIcon = PhoneAccountUtils.getAccountIcon(mActivity, accountHandle);
 
     if (!TextUtils.isEmpty(info.name) || !TextUtils.isEmpty(info.nameAlternative)) {
       details.contactUri = info.lookupUri;

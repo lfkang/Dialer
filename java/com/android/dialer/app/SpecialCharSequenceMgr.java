@@ -33,6 +33,8 @@ import android.support.annotation.Nullable;
 import android.telecom.PhoneAccount;
 import android.telecom.PhoneAccountHandle;
 import android.telephony.PhoneNumberUtils;
+import android.telephony.SubscriptionInfo;
+import android.telephony.SubscriptionManager;
 import android.telephony.TelephonyManager;
 import android.text.TextUtils;
 import android.view.WindowManager;
@@ -49,6 +51,8 @@ import com.android.dialer.common.Assert;
 import com.android.dialer.common.LogUtil;
 import com.android.dialer.oem.MotorolaUtils;
 import com.android.dialer.telecom.TelecomUtil;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -71,6 +75,7 @@ public class SpecialCharSequenceMgr {
 
   private static final String MMI_IMEI_DISPLAY = "*#06#";
   private static final String MMI_REGULATORY_INFO_DISPLAY = "*#07#";
+  private static final String PRL_VERSION_DISPLAY = "*#0000#";
   /** ***** This code is used to handle SIM Contact queries ***** */
   private static final String ADN_PHONE_NUMBER_COLUMN_NAME = "number";
 
@@ -100,6 +105,7 @@ public class SpecialCharSequenceMgr {
     String dialString = PhoneNumberUtils.stripSeparators(input);
 
     if (handleDeviceIdDisplay(context, dialString)
+        || handlePRLVersion(context, dialString)
         || handleRegulatoryInfoDisplay(context, dialString)
         || handlePinEntry(context, dialString)
         || handleAdnEntry(context, dialString, textField)
@@ -111,6 +117,20 @@ public class SpecialCharSequenceMgr {
       return true;
     }
 
+    return false;
+  }
+
+  static private boolean handlePRLVersion(Context context, String input) {
+    if (input.equals(PRL_VERSION_DISPLAY)) {
+        try {
+            Intent intent = new Intent("org.codeaurora.intent.action.ACTION_DEVICEINFO");
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            context.startActivity(intent);
+            return true;
+        } catch (ActivityNotFoundException e) {
+            LogUtil.d(TAG, "no activity to handle showing device info");
+        }
+    }
     return false;
   }
 
@@ -290,27 +310,46 @@ public class SpecialCharSequenceMgr {
   static boolean handleDeviceIdDisplay(Context context, String input) {
     TelephonyManager telephonyManager =
         (TelephonyManager) context.getSystemService(Context.TELEPHONY_SERVICE);
+    SubscriptionManager subscriptionManager = SubscriptionManager.from(context);
 
     if (telephonyManager != null && input.equals(MMI_IMEI_DISPLAY)) {
-      int labelResId =
-          (telephonyManager.getPhoneType() == TelephonyManager.PHONE_TYPE_GSM)
-              ? R.string.imei
-              : R.string.meid;
+      String label = context.getResources().getString(R.string.meid) + " & " +
+        context.getResources().getString(R.string.imei);
 
       List<String> deviceIds = new ArrayList<String>();
       if (TelephonyManagerCompat.getPhoneCount(telephonyManager) > 1) {
+        // Add MEID or ESN
+        String deviceId = null;
         for (int slot = 0; slot < telephonyManager.getPhoneCount(); slot++) {
-          String deviceId = telephonyManager.getDeviceId(slot);
-          if (!TextUtils.isEmpty(deviceId)) {
-            deviceIds.add(deviceId);
+          String meidOrEsn = getMeidOrEsn(telephonyManager, subscriptionManager, slot);
+          if ((deviceId == null && isValidMeid(meidOrEsn))
+              || (deviceId != null && !deviceId.equals(meidOrEsn)
+              && isValidMeid(meidOrEsn))) {
+            deviceIds.add(meidOrEsn);
+          }
+          deviceId = meidOrEsn;
+        }
+
+        // Add IMEI
+        for (int slot = 0; slot < telephonyManager.getPhoneCount(); slot++) {
+          String imei = telephonyManager.getImei(slot);
+          if (!TextUtils.isEmpty(imei)) {
+            deviceIds.add(imei);
           }
         }
       } else {
-        deviceIds.add(telephonyManager.getDeviceId());
+        String meidOrEsn = getMeidOrEsn(telephonyManager, subscriptionManager, 0);
+        if (isValidMeid(meidOrEsn)) {
+          deviceIds.add(meidOrEsn);
+        }
+        String imei = telephonyManager.getImei();
+        if (!TextUtils.isEmpty(imei)) {
+          deviceIds.add(imei);
+        }
       }
 
       new AlertDialog.Builder(context)
-          .setTitle(labelResId)
+          .setTitle(label)
           .setItems(deviceIds.toArray(new String[deviceIds.size()]), null)
           .setPositiveButton(android.R.string.ok, null)
           .setCancelable(false)
@@ -318,6 +357,40 @@ public class SpecialCharSequenceMgr {
       return true;
     }
     return false;
+  }
+
+  private static boolean isValidMeid(String meid) {
+    if (!TextUtils.isEmpty(meid) && !meid.equals("0")
+        && !meid.startsWith("000000")) {
+      return true;
+    }
+    return false;
+  }
+
+  private static String getMeidOrEsn(TelephonyManager tm, SubscriptionManager sm, int slot) {
+    if (tm != null) {
+      String deviceId = tm.getMeid(slot);
+      if (!isValidMeid(deviceId)) {
+        SubscriptionInfo subInfo = sm
+            .getActiveSubscriptionInfoForSimSlotIndex(slot);
+        if (subInfo != null) {
+          try {
+            Method getEsn = tm.getClass()
+              .getDeclaredMethod("getEsn", new Class[]{int.class});
+            getEsn.setAccessible(true);
+            deviceId = (String) getEsn.invoke(tm, subInfo.getSubscriptionId());
+          } catch (NoSuchMethodException e) {
+            e.printStackTrace();
+          } catch (InvocationTargetException e) {
+            e.printStackTrace();
+          } catch (IllegalAccessException e) {
+            e.printStackTrace();
+          }
+        }
+      }
+      return deviceId;
+    }
+    return "";
   }
 
   private static boolean handleRegulatoryInfoDisplay(Context context, String input) {
@@ -467,8 +540,10 @@ public class SpecialCharSequenceMgr {
           String name = c.getString(c.getColumnIndexOrThrow(ADN_NAME_COLUMN_NAME));
           String number = c.getString(c.getColumnIndexOrThrow(ADN_PHONE_NUMBER_COLUMN_NAME));
 
-          // fill the text in.
-          text.getText().replace(0, 0, number);
+          if (!TextUtils.isEmpty(number)) {
+            // fill the text in.
+            text.getText().replace(0, 0, number);
+          }
 
           // display the name as a toast
           Context context = sc.progressDialog.getContext();

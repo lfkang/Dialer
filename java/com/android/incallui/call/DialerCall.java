@@ -17,6 +17,7 @@
 package com.android.incallui.call;
 
 import android.content.Context;
+import android.graphics.drawable.Drawable;
 import android.hardware.camera2.CameraCharacteristics;
 import android.net.Uri;
 import android.os.Build.VERSION;
@@ -39,6 +40,7 @@ import android.telecom.StatusHints;
 import android.telecom.TelecomManager;
 import android.telecom.VideoProfile;
 import android.telephony.PhoneNumberUtils;
+import android.telephony.SubscriptionManager;
 import android.text.TextUtils;
 import com.android.contacts.common.compat.CallCompat;
 import com.android.contacts.common.compat.TelephonyManagerCompat;
@@ -46,6 +48,7 @@ import com.android.contacts.common.compat.telecom.TelecomManagerCompat;
 import com.android.dialer.callintent.CallInitiationType;
 import com.android.dialer.callintent.CallIntentParser;
 import com.android.dialer.callintent.CallSpecificAppData;
+import com.android.dialer.calllogutils.PhoneAccountUtils;
 import com.android.dialer.common.Assert;
 import com.android.dialer.common.LogUtil;
 import com.android.dialer.configprovider.ConfigProviderBindings;
@@ -63,6 +66,7 @@ import com.android.dialer.logging.Logger;
 import com.android.dialer.theme.R;
 import com.android.incallui.audiomode.AudioModeProvider;
 import com.android.incallui.latencyreport.LatencyReport;
+import com.android.incallui.QtiCallUtils;
 import com.android.incallui.util.TelecomCallUtil;
 import com.android.incallui.videotech.VideoTech;
 import com.android.incallui.videotech.VideoTech.VideoTechListener;
@@ -79,6 +83,7 @@ import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
+import org.codeaurora.ims.utils.QtiImsExtUtils;
 
 /** Describes a single call and its state. */
 public class DialerCall implements VideoTechListener, StateChangedListener, CapabilitiesListener {
@@ -86,6 +91,12 @@ public class DialerCall implements VideoTechListener, StateChangedListener, Capa
   public static final int CALL_HISTORY_STATUS_UNKNOWN = 0;
   public static final int CALL_HISTORY_STATUS_PRESENT = 1;
   public static final int CALL_HISTORY_STATUS_NOT_PRESENT = 2;
+
+  /**
+  * NOTE: Capability constant definition has been duplicated to avoid bundling the
+  * Dialer with Frameworks. DON"T chage it without changing the framework value.
+  */
+  public static final int CAPABILITY_ADD_PARTICIPANT = 0x01000000;
 
   // Hard coded property for {@code Call}. Upstreamed change from Motorola.
   // TODO(b/35359461): Move it to Telecom in framework.
@@ -141,11 +152,15 @@ public class DialerCall implements VideoTechListener, StateChangedListener, Capa
   private boolean isInUserWhiteList;
   private boolean isInGlobalSpamList;
   private boolean didShowCameraPermission;
+  private Drawable callProviderIcon;
   private String callProviderLabel;
   private String callbackNumber;
   private int mCameraDirection = CameraDirection.CAMERA_DIRECTION_UNKNOWN;
   private EnrichedCallCapabilities mEnrichedCallCapabilities;
   private Session mEnrichedCallSession;
+  private final TelecomManager mTelecomManager;
+  private PhoneAccount mPhoneAccount;
+  private Details mDetails;
 
   private int answerAndReleaseButtonDisplayedTimes = 0;
   private boolean releasedByAnsweringSecondCall = false;
@@ -251,6 +266,9 @@ public class DialerCall implements VideoTechListener, StateChangedListener, Capa
             case android.telecom.Connection.EVENT_CALL_MERGE_FAILED:
               update();
               break;
+            case TelephonyManagerCompat.EVENT_PHONE_ACCOUNT_CHANGED:
+              update();
+              break;
             case TelephonyManagerCompat.EVENT_HANDOVER_VIDEO_FROM_WIFI_TO_LTE:
               notifyWiFiToLteHandover();
               break;
@@ -299,6 +317,7 @@ public class DialerCall implements VideoTechListener, StateChangedListener, Capa
 
     // Must be after assigning mTelecomCall
     mVideoTechManager = new VideoTechManager(this);
+    mTelecomManager = mContext.getSystemService(TelecomManager.class);
 
     updateFromTelecomCall();
     if (isHiddenNumber() && TextUtils.isEmpty(getNumber())) {
@@ -432,7 +451,16 @@ public class DialerCall implements VideoTechListener, StateChangedListener, Capa
     int oldState = getState();
     // We want to potentially register a video call callback here.
     updateFromTelecomCall();
-    if (oldState != getState() && getState() == DialerCall.State.DISCONNECTED) {
+    // if no details updated, ignore the duplicated state for connecting and dialing
+    final int newState = getState();
+    boolean ignore = mDetails != null && mDetails.equals(mTelecomCall.getDetails());
+    if (oldState == newState && (newState == DialerCall.State.CONNECTING ||
+        newState == DialerCall.State.DIALING) && ignore) {
+      LogUtil.v("DialerCall.update", "ignore unneccessnary connecting or dialing state");
+      return;
+    }
+    mDetails = mTelecomCall.getDetails();
+    if (oldState != newState && newState == DialerCall.State.DISCONNECTED) {
       for (DialerCallListener listener : mListeners) {
         listener.onDialerCallDisconnect();
       }
@@ -491,11 +519,21 @@ public class DialerCall implements VideoTechListener, StateChangedListener, Capa
       mPhoneAccountHandle = newPhoneAccountHandle;
 
       if (mPhoneAccountHandle != null) {
-        PhoneAccount phoneAccount =
-            mContext.getSystemService(TelecomManager.class).getPhoneAccount(mPhoneAccountHandle);
-        if (phoneAccount != null) {
+        mPhoneAccount = mTelecomManager.getPhoneAccount(mPhoneAccountHandle);
+        if (mPhoneAccount != null) {
           mIsCallSubjectSupported =
-              phoneAccount.hasCapabilities(PhoneAccount.CAPABILITY_CALL_SUBJECT);
+              mPhoneAccount.hasCapabilities(PhoneAccount.CAPABILITY_CALL_SUBJECT);
+          final int simAccounts = PhoneAccountUtils.getSubscriptionPhoneAccounts(mContext).size();
+          if (mPhoneAccount.getIcon() != null && simAccounts > 1) {
+            callProviderIcon = mPhoneAccount.getIcon().loadDrawable(mContext);
+          } else {
+            callProviderIcon = null;
+          }
+          if (mPhoneAccount.getLabel() != null && simAccounts > 1) {
+            callProviderLabel = mPhoneAccount.getLabel().toString();
+          } else {
+            callProviderLabel = "";
+          }
         }
       }
     }
@@ -675,6 +713,10 @@ public class DialerCall implements VideoTechListener, StateChangedListener, Capa
     }
   }
 
+  public int getActualState() {
+      return mState;
+  }
+
   public void setState(int state) {
     mState = state;
     if (mState == State.INCOMING) {
@@ -796,7 +838,7 @@ public class DialerCall implements VideoTechListener, StateChangedListener, Capa
 
   /** @return The {@link VideoCall} instance associated with the {@link Call}. */
   public VideoCall getVideoCall() {
-    return mTelecomCall == null ? null : mTelecomCall.getVideoCall();
+    return getVideoTech().getVideoCall();
   }
 
   public List<String> getChildCallIds() {
@@ -832,7 +874,9 @@ public class DialerCall implements VideoTechListener, StateChangedListener, Capa
    * repeated calls to isEmergencyNumber.
    */
   private void updateEmergencyCallState() {
-    mIsEmergencyCall = TelecomCallUtil.isEmergencyCall(mTelecomCall);
+    Uri handle = mTelecomCall.getDetails().getHandle();
+    mIsEmergencyCall = QtiCallUtils.isEmergencyNumber
+        (handle == null ? "" : handle.getSchemeSpecificPart());
   }
 
   public LogState getLogState() {
@@ -918,6 +962,18 @@ public class DialerCall implements VideoTechListener, StateChangedListener, Capa
 
   public String toSimpleString() {
     return super.toString();
+  }
+
+  public boolean isIncomingConfCall() {
+    int callState = getState();
+    if (callState == State.INCOMING || callState == State.CALL_WAITING) {
+      Bundle extras = getExtras();
+      boolean incomingConf = (extras == null)? false :
+          extras.getBoolean(QtiImsExtUtils.QTI_IMS_INCOMING_CONF_EXTRA_KEY, false);
+      LogUtil.i("DialerCall", "isIncomingConfCall = " + incomingConf);
+      return incomingConf;
+    }
+    return false;
   }
 
   @CallHistoryStatus
@@ -1089,28 +1145,25 @@ public class DialerCall implements VideoTechListener, StateChangedListener, Capa
 
   /** Return the string label to represent the call provider */
   public String getCallProviderLabel() {
-    if (callProviderLabel == null) {
-      PhoneAccount account = getPhoneAccount();
-      if (account != null && !TextUtils.isEmpty(account.getLabel())) {
-        List<PhoneAccountHandle> accounts =
-            mContext.getSystemService(TelecomManager.class).getCallCapablePhoneAccounts();
-        if (accounts != null && accounts.size() > 1) {
-          callProviderLabel = account.getLabel().toString();
-        }
-      }
-      if (callProviderLabel == null) {
-        callProviderLabel = "";
-      }
-    }
     return callProviderLabel;
   }
 
-  private PhoneAccount getPhoneAccount() {
+  /** Return the Drawable Icon to represent the call provider */
+  public Drawable getCallProviderIcon() {
+    return callProviderIcon;
+  }
+
+  public PhoneAccount getPhoneAccount() {
+    if (mPhoneAccount != null) {
+      return mPhoneAccount;
+    }
+
     PhoneAccountHandle accountHandle = getAccountHandle();
     if (accountHandle == null) {
       return null;
     }
-    return mContext.getSystemService(TelecomManager.class).getPhoneAccount(accountHandle);
+    mPhoneAccount = mTelecomManager.getPhoneAccount(accountHandle);
+    return mPhoneAccount;
   }
 
   public VideoTech getVideoTech() {
@@ -1118,13 +1171,12 @@ public class DialerCall implements VideoTechListener, StateChangedListener, Capa
   }
 
   public String getCallbackNumber() {
+    // Show the emergency callback number if either:
+    // 1. This is an emergency call.
+    // 2. The phone is in Emergency Callback Mode, which means we should show the callback
+    //    number.
+    boolean showCallbackNumber = hasProperty(Details.PROPERTY_EMERGENCY_CALLBACK_MODE);
     if (callbackNumber == null) {
-      // Show the emergency callback number if either:
-      // 1. This is an emergency call.
-      // 2. The phone is in Emergency Callback Mode, which means we should show the callback
-      //    number.
-      boolean showCallbackNumber = hasProperty(Details.PROPERTY_EMERGENCY_CALLBACK_MODE);
-
       if (isEmergencyCall() || showCallbackNumber) {
         callbackNumber = getSubscriptionNumber();
       } else {
@@ -1137,8 +1189,7 @@ public class DialerCall implements VideoTechListener, StateChangedListener, Capa
         }
       }
 
-      String simNumber =
-          mContext.getSystemService(TelecomManager.class).getLine1Number(getAccountHandle());
+      String simNumber = mTelecomManager.getLine1Number(getAccountHandle());
       if (!showCallbackNumber && PhoneNumberUtils.compare(callbackNumber, simNumber)) {
         LogUtil.v(
             "DialerCall.getCallbackNumber",
@@ -1149,6 +1200,8 @@ public class DialerCall implements VideoTechListener, StateChangedListener, Capa
       if (callbackNumber == null) {
         callbackNumber = "";
       }
+    } else if (!showCallbackNumber) {
+        callbackNumber = "";
     }
     return callbackNumber;
   }
@@ -1157,13 +1210,9 @@ public class DialerCall implements VideoTechListener, StateChangedListener, Capa
     // If it's an emergency call, and they're not populating the callback number,
     // then try to fall back to the phone sub info (to hopefully get the SIM's
     // number directly from the telephony layer).
-    PhoneAccountHandle accountHandle = getAccountHandle();
-    if (accountHandle != null) {
-      PhoneAccount account =
-          mContext.getSystemService(TelecomManager.class).getPhoneAccount(accountHandle);
-      if (account != null) {
-        return getNumberFromHandle(account.getSubscriptionAddress());
-      }
+    PhoneAccount account = getPhoneAccount();
+    if (account != null) {
+      return getNumberFromHandle(account.getSubscriptionAddress());
     }
     return null;
   }
@@ -1188,6 +1237,11 @@ public class DialerCall implements VideoTechListener, StateChangedListener, Capa
   @Override
   public void onPeerDimensionsChanged(int width, int height) {
     InCallVideoCallCallbackNotifier.getInstance().peerDimensionsChanged(this, width, height);
+  }
+
+  @Override
+  public void onCallSessionEvent(int event) {
+    InCallVideoCallCallbackNotifier.getInstance().callSessionEvent(event);
   }
 
   @Override

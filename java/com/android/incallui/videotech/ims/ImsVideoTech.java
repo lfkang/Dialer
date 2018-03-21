@@ -21,6 +21,7 @@ import android.os.Build;
 import android.support.annotation.Nullable;
 import android.telecom.Call;
 import android.telecom.Call.Details;
+import android.telecom.InCallService.VideoCall;
 import android.telecom.VideoProfile;
 import com.android.dialer.common.Assert;
 import com.android.dialer.common.LogUtil;
@@ -41,7 +42,9 @@ public class ImsVideoTech implements VideoTech {
   private @SessionModificationState int sessionModificationState =
       SessionModificationState.NO_REQUEST;
   private int previousVideoState = VideoProfile.STATE_AUDIO_ONLY;
+  private int mUpgradeToVideoState = -1;
   private boolean paused = false;
+  private VideoCall mRegisteredVideoCall;
 
   // Hold onto a flag of whether or not stopTransmission was called but resumeTransmission has not
   // been. This is needed because there is time between calling stopTransmission and
@@ -113,6 +116,12 @@ public class ImsVideoTech implements VideoTech {
   }
 
   @Override
+  public VideoCall getVideoCall() {
+      return call == null || (mRegisteredVideoCall != call.getVideoCall()) ? null
+        : call.getVideoCall();
+  }
+
+  @Override
   public void onCallStateChanged(Context context, int newState) {
     if (!isAvailable(context)) {
       return;
@@ -120,8 +129,9 @@ public class ImsVideoTech implements VideoTech {
 
     if (callback == null) {
       callback = new ImsVideoCallCallback(logger, call, this, listener);
-      call.getVideoCall().registerCallback(callback);
     }
+    call.getVideoCall().registerCallback(callback);
+    mRegisteredVideoCall = call.getVideoCall();
 
     if (getSessionModificationState()
             == SessionModificationState.WAITING_FOR_UPGRADE_TO_VIDEO_RESPONSE
@@ -135,13 +145,21 @@ public class ImsVideoTech implements VideoTech {
       setSessionModificationState(SessionModificationState.NO_REQUEST);
     }
 
-    // Determines if a received upgrade to video request should be cancelled. This can happen if
-    // another InCall UI responds to the upgrade to video request.
     int newVideoState = call.getDetails().getVideoState();
-    if (newVideoState != previousVideoState
-        && sessionModificationState == SessionModificationState.RECEIVED_UPGRADE_TO_VIDEO_REQUEST) {
-      LogUtil.i("ImsVideoTech.onCallStateChanged", "cancelling upgrade notification");
-      setSessionModificationState(SessionModificationState.NO_REQUEST);
+    LogUtil.v("ImsVideoTech.onCallStateChanged","previousVideoState = " +
+        previousVideoState + " newVideoState = " + newVideoState);
+    if (newVideoState != previousVideoState) {
+      if (paused && VideoProfile.isPaused(previousVideoState)
+          && !VideoProfile.isPaused(newVideoState)) {
+        paused = false;
+      }
+
+      // Determines if a received upgrade to video request should be cancelled. This can happen if
+      // another InCall UI responds to the upgrade to video request.
+      if (sessionModificationState == SessionModificationState.RECEIVED_UPGRADE_TO_VIDEO_REQUEST) {
+        LogUtil.i("ImsVideoTech.onCallStateChanged", "cancelling upgrade notification");
+        setSessionModificationState(SessionModificationState.NO_REQUEST);
+      }
     }
     previousVideoState = newVideoState;
   }
@@ -155,9 +173,14 @@ public class ImsVideoTech implements VideoTech {
   }
 
   void setSessionModificationState(@SessionModificationState int state) {
+    LogUtil.i(
+        "ImsVideoTech.setSessionModificationState", "%d -> %d", sessionModificationState, state);
+
+    if (state == SessionModificationState.NO_REQUEST) {
+      mUpgradeToVideoState = -1;
+    }
+
     if (state != sessionModificationState) {
-      LogUtil.i(
-          "ImsVideoTech.setSessionModificationState", "%d -> %d", sessionModificationState, state);
       sessionModificationState = state;
       listener.onSessionModificationStateChanged();
     }
@@ -166,7 +189,7 @@ public class ImsVideoTech implements VideoTech {
   @Override
   public void upgradeToVideo() {
     LogUtil.enterBlock("ImsVideoTech.upgradeToVideo");
-
+    mUpgradeToVideoState = VideoProfile.STATE_BIDIRECTIONAL;
     int unpausedVideoState = getUnpausedVideoState(call.getDetails().getVideoState());
     call.getVideoCall()
         .sendSessionModifyRequest(
@@ -175,13 +198,26 @@ public class ImsVideoTech implements VideoTech {
     logger.logImpression(DialerImpression.Type.IMS_VIDEO_UPGRADE_REQUESTED);
   }
 
+
+  @Override
+  public void upgradeToVideo(int videoState) {
+    LogUtil.i("ImsVideoTech.upgradeToVideo", "videostate = " + videoState);
+    mUpgradeToVideoState = videoState;
+    int unpausedVideoState = getUnpausedVideoState(videoState);
+    call.getVideoCall()
+        .sendSessionModifyRequest(
+            new VideoProfile(unpausedVideoState | videoState));
+    setSessionModificationState((videoState == VideoProfile.STATE_AUDIO_ONLY)
+        ? SessionModificationState.WAITING_FOR_RESPONSE
+        : SessionModificationState.WAITING_FOR_UPGRADE_TO_VIDEO_RESPONSE);
+  }
+
   @Override
   public void acceptVideoRequest() {
     int requestedVideoState = callback.getRequestedVideoState();
     Assert.checkArgument(requestedVideoState != VideoProfile.STATE_AUDIO_ONLY);
     LogUtil.i("ImsVideoTech.acceptUpgradeRequest", "videoState: " + requestedVideoState);
     call.getVideoCall().sendSessionModifyResponse(new VideoProfile(requestedVideoState));
-    setSessionModificationState(SessionModificationState.NO_REQUEST);
     // Telecom manages audio route for us
     listener.onUpgradedToVideo(false /* switchToSpeaker */);
     logger.logImpression(DialerImpression.Type.IMS_VIDEO_REQUEST_ACCEPTED);
@@ -191,8 +227,17 @@ public class ImsVideoTech implements VideoTech {
   public void acceptVideoRequestAsAudio() {
     LogUtil.enterBlock("ImsVideoTech.acceptVideoRequestAsAudio");
     call.getVideoCall().sendSessionModifyResponse(new VideoProfile(VideoProfile.STATE_AUDIO_ONLY));
-    setSessionModificationState(SessionModificationState.NO_REQUEST);
     logger.logImpression(DialerImpression.Type.IMS_VIDEO_REQUEST_ACCEPTED_AS_AUDIO);
+  }
+
+  @Override
+  public void acceptVideoRequest(int requestedVideoState) {
+    LogUtil.i("ImsVideoTech.acceptVideoRequest", "videoState: " + requestedVideoState);
+    call.getVideoCall().sendSessionModifyResponse(new VideoProfile(requestedVideoState));
+    // Telecom manages audio route for us
+    if (VideoProfile.isVideo(requestedVideoState)) {
+      listener.onUpgradedToVideo(false /* switchToSpeaker */);
+    }
   }
 
   @Override
@@ -200,7 +245,6 @@ public class ImsVideoTech implements VideoTech {
     LogUtil.enterBlock("ImsVideoTech.declineUpgradeRequest");
     call.getVideoCall()
         .sendSessionModifyResponse(new VideoProfile(call.getDetails().getVideoState()));
-    setSessionModificationState(SessionModificationState.NO_REQUEST);
     logger.logImpression(DialerImpression.Type.IMS_VIDEO_REQUEST_DECLINED);
   }
 
@@ -285,13 +329,27 @@ public class ImsVideoTech implements VideoTech {
     call.getVideoCall().setDeviceOrientation(rotation);
   }
 
+  @Override
+  public int getRequestedVideoState() {
+    if (callback == null) {
+      LogUtil.w("ImsVideoTech.getRequestedVideoState", "callback is null");
+      return VideoProfile.STATE_AUDIO_ONLY;
+    }
+    return callback.getRequestedVideoState();
+  }
+
+  @Override
+  public int getUpgradeToVideoState() {
+    return mUpgradeToVideoState;
+  }
+
   private boolean canPause() {
     return call.getDetails().can(Details.CAPABILITY_CAN_PAUSE_VIDEO)
         && call.getState() == Call.STATE_ACTIVE
         && isTransmittingOrReceiving();
   }
 
-  static int getUnpausedVideoState(int videoState) {
+  public static int getUnpausedVideoState(int videoState) {
     return videoState & (~VideoProfile.STATE_PAUSED);
   }
 }

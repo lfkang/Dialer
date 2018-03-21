@@ -311,7 +311,7 @@ public class SurfaceViewVideoCallFragment extends Fragment
   @Override
   public void onVideoScreenStart() {
     inCallButtonUiDelegate.refreshMuteState();
-    videoCallScreenDelegate.onVideoCallScreenUiReady();
+    videoCallScreenDelegate.onVideoCallScreenUiReady(this);
     getView().postDelayed(cameraPermissionDialogRunnable, CAMERA_PERMISSION_DIALOG_DELAY_IN_MILLIS);
   }
 
@@ -718,6 +718,10 @@ public class SurfaceViewVideoCallFragment extends Fragment
   }
 
   @Override
+  public void onRequestReadStoragePermission() {
+  }
+
+  @Override
   @NonNull
   public String getCallId() {
     return Assert.isNotNull(getArguments().getString(ARG_CALL_ID));
@@ -891,6 +895,16 @@ public class SurfaceViewVideoCallFragment extends Fragment
   }
 
   @Override
+  public void showVbButton(boolean show) {
+    LogUtil.i("VideoCallFragment.showNVbButton", null);
+  }
+
+  @Override
+  public void updateVbByAudioMode(CallAudioState audioState) {
+    LogUtil.i("VideoCallFragment.updateVbByAudioMode", null);
+  }
+
+  @Override
   public void updateInCallScreenColors() {
     LogUtil.i("SurfaceViewVideoCallFragment.updateColors", null);
   }
@@ -898,6 +912,11 @@ public class SurfaceViewVideoCallFragment extends Fragment
   @Override
   public void onInCallScreenDialpadVisibilityChange(boolean isShowing) {
     LogUtil.i("SurfaceViewVideoCallFragment.onInCallScreenDialpadVisibilityChange", null);
+  }
+
+  @Override
+  public void onInCallShowDialpad(boolean isShown) {
+    LogUtil.i("SurfaceViewVideoCallFragment.onInCallShowDialpad", null);
   }
 
   @Override

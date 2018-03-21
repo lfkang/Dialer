@@ -38,6 +38,10 @@ public class TelephonyManagerCompat {
   public static final String EVENT_HANDOVER_TO_WIFI_FAILED =
       "android.telephony.event.EVENT_HANDOVER_TO_WIFI_FAILED";
   public static final String EVENT_CALL_REMOTELY_HELD = "android.telecom.event.CALL_REMOTELY_HELD";
+
+  public static final String EVENT_PHONE_ACCOUNT_CHANGED =
+       "org.codeaurora.event.PHONE_ACCOUNT_CHANGED";
+
   public static final String EVENT_CALL_REMOTELY_UNHELD =
       "android.telecom.event.CALL_REMOTELY_UNHELD";
   public static final String EVENT_MERGE_START = "android.telecom.event.MERGE_START";
@@ -49,6 +53,9 @@ public class TelephonyManagerCompat {
   public static final String TELEPHONY_MANAGER_CLASS = "android.telephony.TelephonyManager";
 
   private static final String SECRET_CODE_ACTION = "android.provider.Telephony.SECRET_CODE";
+
+  public static final String EXTRA_IS_REFRESH =
+      BuildCompat.isAtLeastOMR1() ? "android.telephony.extra.IS_REFRESH" : "is_refresh";
 
   /**
    * Returns the number of phones available. Returns 1 for Single standby mode (Single SIM

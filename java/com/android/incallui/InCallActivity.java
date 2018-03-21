@@ -172,6 +172,7 @@ public class InCallActivity extends TransactionSafeFragmentActivity
     LogUtil.i("InCallActivity.onPause", "");
     super.onPause();
     common.onPause();
+    BottomSheetHelper.getInstance().dismissBottomSheet();
     InCallPresenter.getInstance().getPseudoScreenState().removeListener(this);
   }
 
@@ -298,12 +299,26 @@ public class InCallActivity extends TransactionSafeFragmentActivity
 
   public boolean showDialpadFragment(boolean show, boolean animate) {
     boolean didChange = common.showDialpadFragment(show, animate);
+    InCallScreen inCallScreen = getActiveInCallScreen();
+    if (inCallScreen == null) {
+      return didChange;
+    }
+
     if (didChange) {
       // Note:  onInCallScreenDialpadVisibilityChange is called here to ensure that the dialpad FAB
       // repositions itself.
-      getInCallScreen().onInCallScreenDialpadVisibilityChange(show);
+      inCallScreen.onInCallScreenDialpadVisibilityChange(show);
     }
+    notifyDialpadVisibilityState(show);
     return didChange;
+  }
+
+  public void notifyDialpadVisibilityState(boolean isShowing) {
+    if (getActiveInCallScreen() != null) {
+      getActiveInCallScreen().onInCallShowDialpad(isShowing);
+    } else {
+      LogUtil.w("InCallActvity.showDialpadFragment","in call screen is null");
+    }
   }
 
   public boolean isDialpadVisible() {
@@ -415,7 +430,7 @@ public class InCallActivity extends TransactionSafeFragmentActivity
     }
   }
 
-  private void enableInCallOrientationEventListener(boolean enable) {
+  public void enableInCallOrientationEventListener(boolean enable) {
     common.enableInCallOrientationEventListener(enable);
   }
 
@@ -423,17 +438,28 @@ public class InCallActivity extends TransactionSafeFragmentActivity
     common.setExcludeFromRecents(exclude);
   }
 
+  private InCallScreen getActiveInCallScreen() {
+    String tag = null;
+    if (didShowVideoCallScreen) {
+      tag = TAG_VIDEO_CALL_SCREEN;
+    } else if (didShowInCallScreen) {
+      tag = TAG_IN_CALL_SCREEN;
+    }
+    return (tag == null) ? null : (InCallScreen)
+        getSupportFragmentManager().findFragmentByTag(tag);
+  }
+
   @Nullable
   public FragmentManager getDialpadFragmentManager() {
-    InCallScreen inCallScreen = getInCallScreen();
-    if (inCallScreen != null) {
-      return inCallScreen.getInCallScreenFragment().getChildFragmentManager();
-    }
-    return null;
+    InCallScreen inCallScreen = getActiveInCallScreen();
+    return (inCallScreen == null) ? null :
+        inCallScreen.getInCallScreenFragment().getChildFragmentManager();
   }
 
   public int getDialpadContainerId() {
-    return getInCallScreen().getAnswerAndDialpadContainerResourceId();
+    InCallScreen inCallScreen = getActiveInCallScreen();
+    return (inCallScreen == null) ? 0 :
+        inCallScreen.getAnswerAndDialpadContainerResourceId();
   }
 
   @Override
@@ -493,15 +519,6 @@ public class InCallActivity extends TransactionSafeFragmentActivity
     common.showInternationalCallOnWifiDialog(call);
   }
 
-  public void setAllowOrientationChange(boolean allowOrientationChange) {
-    if (!allowOrientationChange) {
-      setRequestedOrientation(InCallOrientationEventListener.ACTIVITY_PREFERENCE_DISALLOW_ROTATION);
-    } else {
-      setRequestedOrientation(InCallOrientationEventListener.ACTIVITY_PREFERENCE_ALLOW_ROTATION);
-    }
-    enableInCallOrientationEventListener(allowOrientationChange);
-  }
-
   public void hideMainInCallFragment() {
     LogUtil.i("InCallActivity.hideMainInCallFragment", "");
     if (didShowInCallScreen || didShowVideoCallScreen) {
@@ -538,8 +555,6 @@ public class InCallActivity extends TransactionSafeFragmentActivity
         didShowAnswerScreen,
         didShowInCallScreen,
         didShowVideoCallScreen);
-    // Only video call ui allows orientation change.
-    setAllowOrientationChange(shouldShowVideoUi.shouldShow);
 
     FragmentTransaction transaction = getSupportFragmentManager().beginTransaction();
     boolean didChangeInCall;
@@ -560,9 +575,11 @@ public class InCallActivity extends TransactionSafeFragmentActivity
     }
 
     if (didChangeInCall || didChangeVideo || didChangeAnswer) {
+      BottomSheetHelper.getInstance().dismissBottomSheet();
       transaction.commitNow();
       Logger.get(this).logScreenView(ScreenEvent.Type.INCALL, this);
     }
+    notifyDialpadVisibilityState(isDialpadVisible());
     isInShowMainInCallFragment = false;
   }
 
@@ -763,7 +780,7 @@ public class InCallActivity extends TransactionSafeFragmentActivity
     return (AnswerScreen) getSupportFragmentManager().findFragmentByTag(TAG_ANSWER_SCREEN);
   }
 
-  InCallScreen getInCallScreen() {
+  public InCallScreen getInCallScreen() {
     return (InCallScreen) getSupportFragmentManager().findFragmentByTag(TAG_IN_CALL_SCREEN);
   }
 

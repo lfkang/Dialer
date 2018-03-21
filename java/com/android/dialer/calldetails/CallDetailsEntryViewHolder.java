@@ -38,6 +38,9 @@ import com.android.dialer.enrichedcall.historyquery.proto.HistoryResult.Type;
 import com.android.dialer.oem.MotorolaUtils;
 import com.android.dialer.util.DialerUtils;
 import com.android.dialer.util.IntentUtil;
+import com.android.incallui.QtiCallUtils;
+import com.android.voicemail.impl.SubscriptionInfoHelper;
+import org.codeaurora.ims.utils.QtiImsExtUtils;
 
 /** ViewHolder for call entries in {@link CallDetailsActivity}. */
 public class CallDetailsEntryViewHolder extends ViewHolder {
@@ -92,6 +95,17 @@ public class CallDetailsEntryViewHolder extends ViewHolder {
         (entry.getFeatures() & Calls.FEATURES_PULLED_EXTERNALLY)
             == Calls.FEATURES_PULLED_EXTERNALLY;
 
+    boolean  is4GConferenceEnabledSub = false;
+    SubscriptionInfoHelper subInfo = new SubscriptionInfoHelper(
+        context, entry.getAccountId());
+    int slotId = subInfo.getSimSlotIndex();
+    if (subInfo.hasSubId()) {
+      is4GConferenceEnabledSub = QtiImsExtUtils.isCarrierConfigEnabled(
+          slotId, context, "config_enable_conference_dialer");
+      LogUtil.i("CallDetailsEntryViewHolder.setCallDetails",
+          "is4GConferenceEnabledSub: " + is4GConferenceEnabledSub);
+    }
+
     callTime.setTextColor(getColorForCallType(context, callType));
     callTypeIcon.clear();
     callTypeIcon.add(callType);
@@ -102,7 +116,7 @@ public class CallDetailsEntryViewHolder extends ViewHolder {
 
     callTypeText.setText(callTypeHelper.getCallTypeText(callType, isVideoCall, isPulledCall));
     callTime.setText(CallEntryFormatter.formatDate(context, entry.getDate()));
-    if (CallTypeHelper.isMissedCallType(callType)) {
+    if (CallTypeHelper.isMissedCallType(callType) || is4GConferenceEnabledSub) {
       callDuration.setVisibility(View.GONE);
     } else {
       callDuration.setVisibility(View.VISIBLE);
@@ -172,13 +186,16 @@ public class CallDetailsEntryViewHolder extends ViewHolder {
   private static @ColorInt int getColorForCallType(Context context, int callType) {
     switch (callType) {
       case AppCompatConstants.CALLS_OUTGOING_TYPE:
+      case AppCompatConstants.OUTGOING_IMS_TYPE:
       case AppCompatConstants.CALLS_VOICEMAIL_TYPE:
       case AppCompatConstants.CALLS_BLOCKED_TYPE:
       case AppCompatConstants.CALLS_INCOMING_TYPE:
+      case AppCompatConstants.INCOMING_IMS_TYPE:
       case AppCompatConstants.CALLS_ANSWERED_EXTERNALLY_TYPE:
       case AppCompatConstants.CALLS_REJECTED_TYPE:
         return ContextCompat.getColor(context, R.color.dialer_secondary_text_color);
       case AppCompatConstants.CALLS_MISSED_TYPE:
+      case AppCompatConstants.MISSED_IMS_TYPE:
       default:
         // It is possible for users to end up with calls with unknown call types in their
         // call history, possibly due to 3rd party call log implementations (e.g. to

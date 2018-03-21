@@ -17,6 +17,7 @@
 package com.android.incallui.videotech;
 
 import android.content.Context;
+import android.telecom.InCallService.VideoCall;
 import android.support.annotation.Nullable;
 import com.android.incallui.video.protocol.VideoCallScreen;
 import com.android.incallui.video.protocol.VideoCallScreenDelegate;
@@ -49,9 +50,17 @@ public interface VideoTech {
 
   void upgradeToVideo();
 
+  void upgradeToVideo(int videoState);
+
   void acceptVideoRequest();
 
   void acceptVideoRequestAsAudio();
+
+  void acceptVideoRequest(int videoState);
+
+  int getRequestedVideoState();
+
+  int getUpgradeToVideoState();
 
   void declineVideoRequest();
 
@@ -69,6 +78,8 @@ public interface VideoTech {
 
   void setDeviceOrientation(int rotation);
 
+  VideoCall getVideoCall();
+
   /** Listener for video call events. */
   interface VideoTechListener {
 
@@ -83,5 +94,7 @@ public interface VideoTech {
     void onVideoUpgradeRequestReceived();
 
     void onUpgradedToVideo(boolean switchToSpeaker);
+
+    void onCallSessionEvent(int event);
   }
 }

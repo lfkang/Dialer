@@ -119,6 +119,7 @@ public class CallCardPresenter
   private InCallScreen mInCallScreen;
   private boolean isInCallScreenReady;
   private boolean shouldSendAccessibilityEvent;
+  private final AccessibilityManager accessibilityManager;
 
   @NonNull private final CallLocation callLocation;
   private final Runnable sendAccessibilityEventRunnable =
@@ -140,6 +141,8 @@ public class CallCardPresenter
     LogUtil.i("CallCardController.constructor", null);
     mContext = Assert.isNotNull(context).getApplicationContext();
     callLocation = CallLocationComponent.get(mContext).getCallLocation();
+    accessibilityManager = (AccessibilityManager) mContext
+        .getSystemService(Context.ACCESSIBILITY_SERVICE);
   }
 
   private static boolean hasCallSubject(DialerCall call) {
@@ -425,7 +428,40 @@ public class CallCardPresenter
       return false;
     }
     return primaryChanged
-        || mInCallScreen.isManageConferenceVisible() != shouldShowManageConference();
+        || mInCallScreen.isManageConferenceVisible() != shouldShowManageConference()
+        || (mPrimaryContactInfo != null && !TextUtils.equals(mPrimaryContactInfo.number,
+        mPrimary.getNumber()));
+  }
+
+  private String getPrimaryInfoLocation(ContactCacheEntry contactInfo) {
+    if (contactInfo != null && contactInfo.location != null) {
+      return contactInfo.location;
+    }
+    return "";
+  }
+
+  /**
+   * Returns the label with location for Active Call except conference call and
+   * calling from the saved contact.
+   */
+  private String getLabelWithLocation() {
+    String label = getConnectionLabel();
+    if (mPrimaryContactInfo != null) {
+      String name = getNameForCall(mPrimaryContactInfo);
+      String primaryLocation = getPrimaryInfoLocation(mPrimaryContactInfo);
+      boolean nameIsNumber = name != null && !name.equals(mPrimaryContactInfo.number);
+      boolean isConferenceCall = mPrimary != null && mPrimary.isConferenceCall();
+      boolean isEmergencyCall =  mPrimary != null && mPrimary.isEmergencyCall();
+      if (!(nameIsNumber || isConferenceCall) && isPrimaryCallActive()) {
+        label += "  ";
+        if (isEmergencyCall) {
+          label += mPrimary.getNumber();
+        } else {
+          label += primaryLocation;
+        }
+      }
+    }
+    return label;
   }
 
   private void updatePrimaryCallState() {
@@ -442,6 +478,10 @@ public class CallCardPresenter
               && MotorolaUtils.shouldBlinkHdIconWhenConnectingCall(mContext);
 
       boolean isBusiness = mPrimaryContactInfo != null && mPrimaryContactInfo.isBusiness;
+      boolean isConfCall = (mPrimary.isConferenceCall() || mPrimary.isIncomingConfCall())
+          && !mPrimary.hasProperty(Details.PROPERTY_GENERIC_CONFERENCE);
+
+      String label = getLabelWithLocation();
 
       // Check for video state change and update the visibility of the contact photo.  The contact
       // photo is hidden when the incoming video surface is shown.
@@ -452,17 +492,16 @@ public class CallCardPresenter
           .setCallState(
               new PrimaryCallState(
                   mPrimary.getState(),
-                  mPrimary.isVideoCall(),
+                  !QtiCallUtils.hasVideoCrbtVoLteCall(mContext, mPrimary) && mPrimary.isVideoCall(),
                   mPrimary.getVideoTech().getSessionModificationState(),
                   mPrimary.getDisconnectCause(),
-                  getConnectionLabel(),
+                  label,
                   getCallStateIcon(),
                   getGatewayNumber(),
                   shouldShowCallSubject(mPrimary) ? mPrimary.getCallSubject() : null,
                   mPrimary.getCallbackNumber(),
                   mPrimary.hasProperty(Details.PROPERTY_WIFI),
-                  mPrimary.isConferenceCall()
-                      && !mPrimary.hasProperty(Details.PROPERTY_GENERIC_CONFERENCE),
+                  isConfCall,
                   isWorkCall,
                   isAttemptingHdAudioCall,
                   isHdAudioCall,
@@ -952,7 +991,7 @@ public class CallCardPresenter
       }
     }
 
-    return null;
+    return mPrimary.getCallProviderIcon();
   }
 
   private boolean hasOutgoingGatewayCall() {
@@ -1016,8 +1055,27 @@ public class CallCardPresenter
     maybeShowManageConferenceCallButton();
   }
 
+  @Override
+  public void onSendStaticImageStateChanged(boolean isEnabled) {
+    //No-op
+  }
+
   private boolean isPrimaryCallActive() {
     return mPrimary != null && mPrimary.getState() == DialerCall.State.ACTIVE;
+  }
+
+  @Override
+  public void onSessionModificationStateChange(DialerCall call) {
+   //No-op
+  }
+
+  private String getConferenceString(DialerCall call) {
+    boolean isGenericConference = call.hasProperty(Details.PROPERTY_GENERIC_CONFERENCE);
+    LogUtil.v("CallCardPresenter.getConferenceString", "" + isGenericConference);
+
+    final int resId =
+        isGenericConference ? R.string.generic_conference_call_name : R.string.conference_call_name;
+    return mContext.getResources().getString(resId);
   }
 
   private boolean shouldShowEndCallButton(DialerCall primary, int callState) {
@@ -1088,9 +1146,7 @@ public class CallCardPresenter
     if (mContext == null) {
       return;
     }
-    final AccessibilityManager am =
-        (AccessibilityManager) mContext.getSystemService(Context.ACCESSIBILITY_SERVICE);
-    if (!am.isEnabled()) {
+    if (!accessibilityManager.isEnabled()) {
       return;
     }
     // Announce the current call if it's new incoming/outgoing call or primary call is changed

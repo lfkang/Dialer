@@ -17,6 +17,7 @@
 package com.android.incallui.videotech.empty;
 
 import android.content.Context;
+import android.telecom.InCallService.VideoCall;
 import android.support.annotation.Nullable;
 import com.android.dialer.common.Assert;
 import com.android.incallui.video.protocol.VideoCallScreen;
@@ -68,10 +69,26 @@ public class EmptyVideoTech implements VideoTech {
   public void upgradeToVideo() {}
 
   @Override
+  public void upgradeToVideo(int videoState) {}
+
+  @Override
+  public int getUpgradeToVideoState() {
+    return -1;
+  }
+
+  @Override
+  public int getRequestedVideoState() {
+    return -1;
+  }
+
+  @Override
   public void acceptVideoRequest() {}
 
   @Override
   public void acceptVideoRequestAsAudio() {}
+
+  @Override
+  public void acceptVideoRequest(int videoState) {}
 
   @Override
   public void declineVideoRequest() {}
@@ -98,4 +115,7 @@ public class EmptyVideoTech implements VideoTech {
 
   @Override
   public void setDeviceOrientation(int rotation) {}
+
+  @Override
+  public VideoCall getVideoCall() {return null;}
 }

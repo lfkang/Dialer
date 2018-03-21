@@ -16,6 +16,7 @@
 
 package com.android.incallui.incall.impl;
 
+import android.app.Activity;
 import android.Manifest.permission;
 import android.content.Context;
 import android.content.pm.PackageManager;
@@ -28,13 +29,18 @@ import android.support.annotation.Nullable;
 import android.support.v4.app.Fragment;
 import android.support.v4.app.FragmentTransaction;
 import android.support.v4.content.ContextCompat;
+import android.support.v4.view.ViewPager;
+import android.media.AudioManager;
+import android.provider.Settings;
 import android.telecom.CallAudioState;
 import android.telephony.TelephonyManager;
+import android.view.Gravity;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.View.OnClickListener;
 import android.view.ViewGroup;
 import android.view.accessibility.AccessibilityEvent;
+import android.widget.ImageButton;
 import android.widget.ImageView;
 import android.widget.RelativeLayout;
 import android.widget.Toast;
@@ -44,10 +50,16 @@ import com.android.dialer.common.LogUtil;
 import com.android.dialer.logging.DialerImpression;
 import com.android.dialer.logging.Logger;
 import com.android.dialer.multimedia.MultimediaData;
+import com.android.incallui.BottomSheetHelper;
+import com.android.incallui.ExtBottomSheetFragment.ExtBottomSheetActionCallback;
+import com.android.incallui.audiomode.AudioModeProvider;
 import com.android.dialer.widget.LockableViewPager;
 import com.android.incallui.audioroute.AudioRouteSelectorDialogFragment;
 import com.android.incallui.audioroute.AudioRouteSelectorDialogFragment.AudioRouteSelectorPresenter;
 import com.android.incallui.contactgrid.ContactGridManager;
+import com.android.incallui.call.CallList;
+import com.android.incallui.call.DialerCall;
+import com.android.incallui.call.DialerCall.State;
 import com.android.incallui.hold.OnHoldFragment;
 import com.android.incallui.incall.impl.ButtonController.SpeakerButtonController;
 import com.android.incallui.incall.impl.InCallButtonGridFragment.OnButtonGridCreatedListener;
@@ -62,6 +74,8 @@ import com.android.incallui.incall.protocol.InCallScreenDelegateFactory;
 import com.android.incallui.incall.protocol.PrimaryCallState;
 import com.android.incallui.incall.protocol.PrimaryInfo;
 import com.android.incallui.incall.protocol.SecondaryInfo;
+import com.android.voicemail.impl.SubscriptionInfoHelper;
+
 import java.util.ArrayList;
 import java.util.List;
 
@@ -70,6 +84,7 @@ public class InCallFragment extends Fragment
     implements InCallScreen,
         InCallButtonUi,
         OnClickListener,
+        ExtBottomSheetActionCallback,
         AudioRouteSelectorPresenter,
         OnButtonGridCreatedListener {
 
@@ -78,6 +93,7 @@ public class InCallFragment extends Fragment
   private InCallPaginator paginator;
   private LockableViewPager pager;
   private InCallPagerAdapter adapter;
+  private View moreOptionsMenuButton;
   private ContactGridManager contactGridManager;
   private InCallScreenDelegate inCallScreenDelegate;
   private InCallButtonUiDelegate inCallButtonUiDelegate;
@@ -85,8 +101,19 @@ public class InCallFragment extends Fragment
   @Nullable private ButtonChooser buttonChooser;
   private SecondaryInfo savedSecondaryInfo;
   private int voiceNetworkType;
-  private int phoneType;
+  private int phoneType = TelephonyManager.PHONE_TYPE_NONE;
   private boolean stateRestored;
+  private ImageButton mVbButton;
+  private AudioManager mAudioManager;
+  private TelephonyManager mTelephonyManager;
+  private int mTtyMode;
+  private boolean mVolumeBoostEnabled;
+
+  private static final int TTY_MODE_OFF = 0;
+  private static final int TTY_MODE_HCO = 2;
+
+  private static final String VOLUME_BOOST = "volume_boost";
+  private static final String PREFERRED_TTY_MODE = "preferred_tty_mode";
 
   // Add animation to educate users. If a call has enriched calling attachments then we'll
   // initially show the attachment page. After a delay seconds we'll animate to the button grid.
@@ -129,6 +156,11 @@ public class InCallFragment extends Fragment
       inCallButtonUiDelegate.onRestoreInstanceState(savedInstanceState);
       stateRestored = true;
     }
+    mAudioManager = (AudioManager) getActivity().getSystemService(Context.AUDIO_SERVICE);
+    mTelephonyManager = (TelephonyManager) getContext().getSystemService(Context.TELEPHONY_SERVICE);
+    mTtyMode = Settings.Secure.getInt(getContext().getContentResolver(),
+        PREFERRED_TTY_MODE, TTY_MODE_OFF);
+    mVolumeBoostEnabled = mAudioManager.getParameters(VOLUME_BOOST).contains("=on");
   }
 
   @Nullable
@@ -157,17 +189,26 @@ public class InCallFragment extends Fragment
     endCallButton = view.findViewById(R.id.incall_end_call);
     endCallButton.setOnClickListener(this);
 
-    if (ContextCompat.checkSelfPermission(getContext(), permission.READ_PHONE_STATE)
-        != PackageManager.PERMISSION_GRANTED) {
-      voiceNetworkType = TelephonyManager.NETWORK_TYPE_UNKNOWN;
-    } else {
+    moreOptionsMenuButton = view.findViewById(R.id.incall_more_button);
+    moreOptionsMenuButton.setOnClickListener(this);
 
-      voiceNetworkType =
-          VERSION.SDK_INT >= VERSION_CODES.N
-              ? getContext().getSystemService(TelephonyManager.class).getVoiceNetworkType()
-              : TelephonyManager.NETWORK_TYPE_UNKNOWN;
-    }
-    phoneType = getContext().getSystemService(TelephonyManager.class).getPhoneType();
+    mVbButton = (ImageButton) view.findViewById(R.id.volumeBoost);
+      if (mVbButton != null) {
+        mVbButton.setOnClickListener(new View. OnClickListener() {
+          @Override
+          public void onClick(View arg0) {
+            if (isVbAvailable()) {
+            // Switch Volume Boost status
+            setVolumeBoost(!isVolumeBoostOn());
+            }
+
+            updateVbButton();
+            showVbNotify();
+          }
+      });
+      }
+      updateVoiceNetworkType();
+
     return view;
   }
 
@@ -227,10 +268,25 @@ public class InCallFragment extends Fragment
     if (view == endCallButton) {
       LogUtil.i("InCallFragment.onClick", "end call button clicked");
       inCallScreenDelegate.onEndCallClicked();
+    } else if (view == moreOptionsMenuButton) {
+      LogUtil.i("InCallFragment.onClick","more options button clicked");
+      BottomSheetHelper.getInstance()
+              .showBottomSheet(getChildFragmentManager());
     } else {
       LogUtil.e("InCallFragment.onClick", "unknown view: " + view);
       Assert.fail();
     }
+  }
+
+  @Override
+  public void optionSelected(@Nullable String text) {
+    //Tiggered on item selection on bottomsheet.
+    BottomSheetHelper.getInstance().optionSelected(text);
+  }
+
+  @Override
+  public void sheetDismissed() {
+    BottomSheetHelper.getInstance().sheetDismissed();
   }
 
   @Override
@@ -314,10 +370,45 @@ public class InCallFragment extends Fragment
   @Override
   public void setCallState(@NonNull PrimaryCallState primaryCallState) {
     LogUtil.i("InCallFragment.setCallState", primaryCallState.toString());
+    setPhoneType();
+    updateVoiceNetworkType();
     contactGridManager.setCallState(primaryCallState);
     buttonChooser =
         ButtonChooserFactory.newButtonChooser(voiceNetworkType, primaryCallState.isWifi, phoneType);
     updateButtonStates();
+    if (mVbButton != null) {
+      updateVbByCall(primaryCallState.state);
+    }
+  }
+
+  private void setPhoneType() {
+    if (phoneType == TelephonyManager.PHONE_TYPE_NONE) {
+      DialerCall activeCall = CallList.getInstance().getFirstCall();
+      if (activeCall != null) {
+        SubscriptionInfoHelper subInfoHelper = new SubscriptionInfoHelper(getContext(),
+            activeCall.getAccountHandle());
+        if (subInfoHelper != null) {
+          int subId = subInfoHelper.getSubId();
+          phoneType = (subId == SubscriptionInfoHelper.NO_SUB_ID) ?
+              TelephonyManager.PHONE_TYPE_SIP :
+              mTelephonyManager.getCurrentPhoneType(subId);
+        }
+      }
+    }
+  }
+
+  private void updateVoiceNetworkType() {
+      if (ContextCompat.checkSelfPermission(getContext(), permission.READ_PHONE_STATE)
+              != PackageManager.PERMISSION_GRANTED) {
+          voiceNetworkType = TelephonyManager.NETWORK_TYPE_UNKNOWN;
+      } else {
+          voiceNetworkType =
+              VERSION.SDK_INT >= VERSION_CODES.N
+              ? mTelephonyManager.getVoiceNetworkType()
+              : TelephonyManager.NETWORK_TYPE_UNKNOWN;
+      }
+      LogUtil.v("InCallFragment.updateVoiceNetwork", "NetworkType: " +
+                                                        Integer.toString(voiceNetworkType));
   }
 
   @Override
@@ -366,6 +457,15 @@ public class InCallFragment extends Fragment
       // Update the Android Button's state to isShowing.
       inCallButtonGridFragment.onInCallScreenDialpadVisibilityChange(isShowing);
     }
+  }
+
+  @Override
+  public void onInCallShowDialpad(boolean isShown) {
+    LogUtil.i("InCallFragment.onInCallShowDialpad","isShown: "+isShown);
+    BottomSheetHelper bottomSheetHelper = BottomSheetHelper.getInstance();
+    bottomSheetHelper.updateMoreButtonVisibility(
+        isShown ? false : bottomSheetHelper.shallShowMoreButton(getActivity()),
+        moreOptionsMenuButton);
   }
 
   @Override
@@ -441,6 +541,7 @@ public class InCallFragment extends Fragment
     if (inCallButtonGridFragment == null) {
       return;
     }
+    setPhoneType();
     int numVisibleButtons =
         inCallButtonGridFragment.updateButtonStates(
             buttonControllers, buttonChooser, voiceNetworkType, phoneType);
@@ -459,6 +560,9 @@ public class InCallFragment extends Fragment
         pager.setCurrentItem(adapter.getButtonGridPosition());
       }
     }
+    BottomSheetHelper bottomSheetHelper = BottomSheetHelper.getInstance();
+    bottomSheetHelper.updateMoreButtonVisibility(
+        bottomSheetHelper.shallShowMoreButton(getActivity()), moreOptionsMenuButton);
   }
 
   @Override
@@ -546,5 +650,93 @@ public class InCallFragment extends Fragment
 
   private Fragment getLocationFragment() {
     return getChildFragmentManager().findFragmentById(R.id.incall_location_holder);
+  }
+
+  private boolean isVbAvailable() {
+    int mode = AudioModeProvider.getInstance().getAudioState().getRoute();
+
+    return (mode == CallAudioState.ROUTE_EARPIECE || mode == CallAudioState.ROUTE_SPEAKER
+        || mTtyMode == TTY_MODE_HCO);
+  }
+
+  private void updateVbButton() {
+    if (mVbButton != null) {
+      if (isVbAvailable()) {
+        if (isVolumeBoostOn()) {
+          mVbButton.setBackgroundResource(R.drawable.vb_active);
+        } else {
+          mVbButton.setBackgroundResource(R.drawable.vb_normal);
+        }
+      } else {
+        mVbButton.setBackgroundResource(R.drawable.vb_disable);
+      }
+    }
+  }
+
+  @Override
+  public void showVbButton(boolean show) {
+    if (mVbButton != null){
+      mVbButton.setVisibility(show ? View.VISIBLE : View.GONE);
+    }
+  }
+
+  private void showVbNotify() {
+    Toast vbnotify;
+    int resId = R.string.volume_boost_notify_unavailable;
+
+    if (isVbAvailable()) {
+      if (isVolumeBoostOn()) {
+        resId = R.string.volume_boost_notify_enabled;
+      } else {
+        resId = R.string.volume_boost_notify_disabled;
+      }
+    }
+
+    vbnotify = Toast.makeText(getView().getContext(), resId, Toast.LENGTH_SHORT);
+    vbnotify.setGravity(Gravity.CENTER, 0, 0);
+    vbnotify.show();
+  }
+
+  private void updateVbByCall(int state) {
+    updateVbButton();
+
+    if (DialerCall.State.ACTIVE == state) {
+      mVbButton.setVisibility(View.VISIBLE);
+    } else {
+      mVbButton.setVisibility(View.GONE);
+      if (isVolumeBoostOn()) {
+        setVolumeBoost(false);
+      }
+    }
+  }
+
+  public void updateVbByAudioMode(CallAudioState audioState) {
+    int mode = audioState.getRoute();
+    if (!(mode == CallAudioState.ROUTE_EARPIECE
+        || mode == CallAudioState.ROUTE_BLUETOOTH
+        || mode == CallAudioState.ROUTE_WIRED_HEADSET
+        || mode == CallAudioState.ROUTE_SPEAKER)) {
+    return;
+    }
+
+    if (mAudioManager != null && isVolumeBoostOn()) {
+      setVolumeBoost(false);
+    }
+
+    updateVbButton();
+  }
+
+  private void setVolumeBoost(boolean on){
+    if (on) {
+      mAudioManager.setParameters(VOLUME_BOOST + "=on");
+    } else {
+      mAudioManager.setParameters(VOLUME_BOOST + "=off");
+    }
+    mVolumeBoostEnabled = on;
+  }
+
+  private boolean isVolumeBoostOn(){
+
+    return mVolumeBoostEnabled;
   }
 }

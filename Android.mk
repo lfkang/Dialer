@@ -299,6 +299,7 @@ LOCAL_STATIC_JAVA_LIBRARIES := \
 	libphonenumber \
 	okhttp \
 	volley \
+        ims-ext-common
 
 LOCAL_STATIC_ANDROID_LIBRARIES := \
 	android-support-design \
@@ -311,6 +312,8 @@ LOCAL_STATIC_ANDROID_LIBRARIES := \
 
 LOCAL_JAVA_LIBRARIES := \
 	dialer-auto-value \
+        telephony-ext \
+        ims-common \
 	org.apache.http.legacy \
 
 # Libraries needed by the compiler (JACK) to generate code.
@@ -350,9 +353,11 @@ LOCAL_PROGUARD_ENABLED := custom
 LOCAL_PROGUARD_ENABLED += optimization
 endif
 
-# End Bug: 37077388
-
-LOCAL_SDK_VERSION := system_current
+# TINNO BEGIN
+# modify by chenqi.zhao for can import package [vendor/tinno/common/frameworks/base/core/java] 20171125
+#LOCAL_SDK_VERSION := system_current
+LOCAL_JAVA_LIBRARIES += legacy-test
+# TINNO END
 LOCAL_MODULE_TAGS := optional
 LOCAL_PACKAGE_NAME := Dialer
 LOCAL_CERTIFICATE := shared

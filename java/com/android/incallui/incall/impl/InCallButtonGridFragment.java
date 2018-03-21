@@ -16,6 +16,7 @@
 
 package com.android.incallui.incall.impl;
 
+import android.content.Context;
 import android.os.Bundle;
 import android.support.annotation.Nullable;
 import android.support.v4.app.Fragment;
@@ -28,6 +29,16 @@ import com.android.dialer.common.FragmentUtils;
 import com.android.incallui.incall.protocol.InCallButtonIds;
 import java.util.List;
 import java.util.Set;
+
+//TINNO BEGIN
+//FEATURE_SMARTGESTURE <免提切换> chenqi.zhao 20160923
+import com.android.incallui.call.TelecomAdapter;
+import android.content.BroadcastReceiver;
+import android.content.Intent;
+import android.content.IntentFilter;
+import android.telecom.AudioState;
+import com.tinno.feature.FeatureMBA;
+//TINNO END
 
 /** Fragment for the in call buttons (mute, speaker, ect.). */
 public class InCallButtonGridFragment extends Fragment {
@@ -47,6 +58,15 @@ public class InCallButtonGridFragment extends Fragment {
     super.onCreate(bundle);
     buttonGridListener = FragmentUtils.getParent(this, OnButtonGridCreatedListener.class);
     Assert.isNotNull(buttonGridListener);
+
+    //TINNO BEGIN
+    //FEATURE_SMARTGESTURE <免提切换> chenqi.zhao 20160923
+    if (FeatureMBA.MBA_FTR_ApeSmartGesture_REQC1194) {
+      IntentFilter filter = new IntentFilter();
+      filter.addAction("com.android.phone.ACTION_AUDIO_MODE_CHANGE");
+      getActivity().registerReceiver(audioStateReceiver, filter);
+    }
+    //TINNO END
   }
 
   @Nullable
@@ -76,6 +96,31 @@ public class InCallButtonGridFragment extends Fragment {
     super.onDestroyView();
     buttonGridListener.onButtonGridDestroyed();
   }
+
+  //TINNO BEGIN
+  //FEATURE_SMARTGESTURE <免提切换> chenqi.zhao 20160923
+  @Override
+  public void onDestroy() {
+    super.onDestroy();
+    if (FeatureMBA.MBA_FTR_ApeSmartGesture_REQC1194) {
+      getActivity().unregisterReceiver(audioStateReceiver);
+    }
+  }
+
+  private BroadcastReceiver audioStateReceiver = new BroadcastReceiver() {
+
+    @Override
+    public void onReceive(Context context, Intent intent) {
+      if (!"com.android.phone.ACTION_AUDIO_MODE_CHANGE".equals(intent.getAction())) {
+        return;
+      }
+      boolean speakerOn = intent.getBooleanExtra("speakerOn", false);
+      int newMode = speakerOn ? AudioState.ROUTE_SPEAKER : AudioState.ROUTE_WIRED_OR_EARPIECE;
+      TelecomAdapter.getInstance().setAudioRoute(newMode);
+//      getPresenter().setAudioMode(newMode);
+    }
+  };
+  //TINNO END
 
   public void onInCallScreenDialpadVisibilityChange(boolean isShowing) {
     for (CheckableLabeledButton button : buttons) {

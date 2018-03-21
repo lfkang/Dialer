@@ -52,14 +52,17 @@ import android.telecom.Call.Details;
 import android.telecom.PhoneAccount;
 import android.telecom.PhoneAccountHandle;
 import android.telecom.TelecomManager;
+import android.telecom.VideoProfile;
 import android.text.BidiFormatter;
 import android.text.Spannable;
 import android.text.SpannableString;
 import android.text.TextDirectionHeuristics;
 import android.text.TextUtils;
 import android.text.style.ForegroundColorSpan;
+import com.android.contacts.common.compat.telecom.TelecomManagerCompat;
 import com.android.contacts.common.ContactsUtils;
 import com.android.contacts.common.ContactsUtils.UserType;
+import com.android.dialer.location.GeoUtil;
 import com.android.contacts.common.lettertiles.LetterTileDrawable;
 import com.android.contacts.common.lettertiles.LetterTileDrawable.ContactType;
 import com.android.contacts.common.preference.ContactsPreferences;
@@ -67,11 +70,13 @@ import com.android.contacts.common.util.BitmapUtil;
 import com.android.contacts.common.util.ContactDisplayUtils;
 import com.android.dialer.common.LogUtil;
 import com.android.dialer.configprovider.ConfigProviderBindings;
+import com.android.dialer.enrichedcall.EnrichedCallComponent;
 import com.android.dialer.enrichedcall.EnrichedCallManager;
 import com.android.dialer.enrichedcall.Session;
 import com.android.dialer.multimedia.MultimediaData;
 import com.android.dialer.notification.NotificationChannelId;
 import com.android.dialer.oem.MotorolaUtils;
+import com.android.dialer.telecom.TelecomUtil;
 import com.android.dialer.util.DrawableConverter;
 import com.android.incallui.ContactInfoCache.ContactCacheEntry;
 import com.android.incallui.ContactInfoCache.ContactInfoCacheCallback;
@@ -118,6 +123,7 @@ public class StatusBarNotifier
   @Nullable private ContactsPreferences mContactsPreferences;
   private int mCurrentNotification = NOTIFICATION_NONE;
   private int mCallState = DialerCall.State.INVALID;
+  private int mVideoState = VideoProfile.STATE_AUDIO_ONLY;
   private int mSavedIcon = 0;
   private String mSavedContent = null;
   private Bitmap mSavedLargeIcon;
@@ -247,9 +253,16 @@ public class StatusBarNotifier
 
   @RequiresPermission(Manifest.permission.READ_PHONE_STATE)
   private void showNotification(final CallList callList, final DialerCall call) {
-    final boolean isIncoming =
-        (call.getState() == DialerCall.State.INCOMING
-            || call.getState() == DialerCall.State.CALL_WAITING);
+    final boolean isGeocoderLocationNeeded =
+        (call.getState() == DialerCall.State.INCOMING ||
+        call.getState() == DialerCall.State.CALL_WAITING ||
+        call.getState() == DialerCall.State.DIALING ||
+        call.getState() == DialerCall.State.CONNECTING ||
+        call.getState() == DialerCall.State.SELECT_PHONE_ACCOUNT);
+    LogUtil.i(
+        "StatusBarNotifier.buildAndSendNotification",
+        "showNotification isGeocoderLocationNeeded = " + isGeocoderLocationNeeded);
+
     setStatusBarCallListener(new StatusBarCallListener(call));
 
     // we make a call to the contact info cache to query for supplemental data to what the
@@ -259,7 +272,7 @@ public class StatusBarNotifier
     // call into the contacts provider for more data.
     mContactInfoCache.findInfo(
         call,
-        isIncoming,
+        isGeocoderLocationNeeded,
         new ContactInfoCacheCallback() {
           @Override
           @RequiresPermission(Manifest.permission.READ_PHONE_STATE)
@@ -299,7 +312,7 @@ public class StatusBarNotifier
     // Check if data has changed; if nothing is different, don't issue another notification.
     final int iconResId = getIconToDisplay(call);
     Bitmap largeIcon = getLargeIconToDisplay(mContext, contactInfo, call);
-    final String content = getContentString(call, contactInfo.userType);
+    String content = getContentString(call, contactInfo.userType);
     final String contentTitle = getContentTitle(contactInfo, call);
 
     final boolean isVideoUpgradeRequest =
@@ -326,12 +339,22 @@ public class StatusBarNotifier
       notificationType = NOTIFICATION_IN_CALL;
     }
 
+    PhoneAccount account = call.getPhoneAccount();
+    String accountLabel = null;
+    if (account != null && !TextUtils.isEmpty(account.getLabel())) {
+      accountLabel = account.getLabel().toString();
+    }
+    if (!TextUtils.isEmpty(accountLabel)) {
+      content += " (" + accountLabel + ")";
+    }
+
     if (!checkForChangeAndSaveData(
         iconResId,
         content,
         largeIcon,
         contentTitle,
         callState,
+        call.getVideoState(),
         notificationType,
         contactInfo.contactRingtoneUri)) {
       return;
@@ -520,6 +543,7 @@ public class StatusBarNotifier
       Bitmap largeIcon,
       String contentTitle,
       int state,
+      int videoState,
       int notificationType,
       Uri ringtone) {
 
@@ -538,13 +562,16 @@ public class StatusBarNotifier
         (mSavedIcon != icon)
             || !Objects.equals(mSavedContent, content)
             || (mCallState != state)
+            || (mVideoState != videoState)
             || largeIconChanged
             || contentTitleChanged
             || !Objects.equals(mRingtone, ringtone);
 
     // If we aren't showing a notification right now or the notification type is changing,
     // definitely do an update.
-    if (mCurrentNotification != notificationType) {
+    boolean ignoreIncomming = mCurrentNotification == NOTIFICATION_INCOMING_CALL_QUIET
+        && notificationType == NOTIFICATION_INCOMING_CALL && !retval;
+    if (mCurrentNotification != notificationType && !ignoreIncomming) {
       if (mCurrentNotification == NOTIFICATION_NONE) {
         LogUtil.d(
             "StatusBarNotifier.checkForChangeAndSaveData", "showing notification for first time.");
@@ -552,9 +579,16 @@ public class StatusBarNotifier
       retval = true;
     }
 
+    if (ignoreIncomming) {
+      LogUtil.d(
+          "StatusBarNotifier.checkForChangeAndSaveData",
+          "ignore this notification due to be already treated as incoming quiet.");
+    }
+
     mSavedIcon = icon;
     mSavedContent = content;
     mCallState = state;
+    mVideoState = videoState;
     mSavedLargeIcon = largeIcon;
     mSavedContentTitle = contentTitle;
     mRingtone = ringtone;
@@ -576,16 +610,20 @@ public class StatusBarNotifier
           mContext, call.hasProperty(Details.PROPERTY_GENERIC_CONFERENCE));
     }
 
-    String preferredName =
-        ContactDisplayUtils.getPreferredDisplayName(
-            contactInfo.namePrimary, contactInfo.nameAlternative, mContactsPreferences);
-    if (TextUtils.isEmpty(preferredName)) {
-      return TextUtils.isEmpty(contactInfo.number)
+    if (TextUtils.isEmpty(contactInfo.namePrimary)) {
+      String contactNumberDisplayed = TextUtils.isEmpty(contactInfo.number)
+          ? ""
+          : contactInfo.number.toString();
+      String location_info = GeoUtil.getGeocodedLocationFor(mContext, contactNumberDisplayed);
+      if (!TextUtils.isEmpty(location_info)){
+        contactNumberDisplayed =  contactNumberDisplayed + " (" + location_info + ")";
+      }
+      return TextUtils.isEmpty(contactNumberDisplayed)
           ? null
           : BidiFormatter.getInstance()
-              .unicodeWrap(contactInfo.number, TextDirectionHeuristics.LTR);
+              .unicodeWrap(contactNumberDisplayed, TextDirectionHeuristics.LTR);
     }
-    return preferredName;
+    return contactInfo.namePrimary;
   }
 
   private void addPersonReference(
@@ -659,18 +697,28 @@ public class StatusBarNotifier
     // different calls.  So if both lines are in use, display info
     // from the foreground call.  And if there's a ringing call,
     // display that regardless of the state of the other calls.
+    int resId;
+    boolean supportsVoicePrivacy = call.hasProperty(Details.PROPERTY_HAS_CDMA_VOICE_PRIVACY);
+    android.util.Log.i("TAG","Dialer ==== > supportsVoicePrivacy : "+supportsVoicePrivacy);
     if (call.getState() == DialerCall.State.ONHOLD) {
-      return R.drawable.ic_phone_paused_white_24dp;
+        if (supportsVoicePrivacy) {
+            return R.drawable.stat_sys_vp_phone_call_on_hold;
+        } else {
+            return R.drawable.ic_phone_paused_white_24dp;
+        }
     } else if (call.getVideoTech().getSessionModificationState()
         == SessionModificationState.RECEIVED_UPGRADE_TO_VIDEO_REQUEST) {
-      return R.drawable.quantum_ic_videocam_white_24;
+        return R.drawable.quantum_ic_videocam_white_24;
     } else if (call.hasProperty(PROPERTY_HIGH_DEF_AUDIO)
         && MotorolaUtils.shouldShowHdIconInNotification(mContext)) {
       // Normally when a call is ongoing the status bar displays an icon of a phone. This is a
       // helpful hint for users so they know how to get back to the call. For Sprint HD calls, we
       // replace this icon with an icon of a phone with a HD badge. This is a carrier requirement.
       return R.drawable.ic_hd_call;
+    } else if (supportsVoicePrivacy) {
+      return R.drawable.stat_sys_vp_phone_call;
     }
+
     // If ReturnToCall is enabled, use the static icon. The animated one will show in the bubble.
     if (ReturnToCallController.isEnabled(mContext)) {
       return R.drawable.quantum_ic_call_white_24;
@@ -701,8 +749,22 @@ public class StatusBarNotifier
     }
 
     if (isIncomingOrWaiting) {
+      EnrichedCallManager manager = EnrichedCallComponent.get(mContext).getEnrichedCallManager();
+      Session session = null;
+      if (call.getNumber() != null) {
+        session =
+            manager.getSession(
+                call.getUniqueCallId(),
+                call.getNumber(),
+                manager.createIncomingCallComposerFilter());
+      }
+
       if (call.isSpam()) {
         resId = R.string.notification_incoming_spam_call;
+      } else if (session != null) {
+        resId = getECIncomingCallText(session);
+      } else if (call.isIncomingConfCall()) {
+        resId = R.string.notification_incoming_conf_call;
       } else if (shouldShowEnrichedCallNotification(call.getEnrichedCallSession())) {
         resId = getECIncomingCallText(call.getEnrichedCallSession());
       } else if (call.hasProperty(Details.PROPERTY_WIFI)) {
@@ -717,6 +779,14 @@ public class StatusBarNotifier
     } else if (call.getVideoTech().getSessionModificationState()
         == SessionModificationState.RECEIVED_UPGRADE_TO_VIDEO_REQUEST) {
       resId = R.string.notification_requesting_video_call;
+      final int requestedVideoState = call.getVideoTech().getRequestedVideoState();
+      if(!VideoProfile.isBidirectional(requestedVideoState)) {
+        if(VideoProfile.isTransmissionEnabled(requestedVideoState)) {
+          resId = R.string.notification_requesting_video_tx_call;
+        } else if(VideoProfile.isReceptionEnabled(requestedVideoState)) {
+          resId = R.string.notification_requesting_video_rx_call;
+        }
+      }
     }
 
     // Is the call placed through work connection service.
